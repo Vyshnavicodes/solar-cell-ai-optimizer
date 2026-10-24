@@ -1,135 +1,388 @@
+
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
 from pathlib import Path
-import numpy as np
+import html
 
-# --------------------------------------------------
-# PAGE SETTINGS
-# --------------------------------------------------
+# =========================================================
+# CONFIGURATION
+# =========================================================
 st.set_page_config(
-    page_title="SolarCell AI Optimizer",
+    page_title="SolarCell AI | Material Intelligence",
     page_icon="☀️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-# --------------------------------------------------
-# DESIGN
-# --------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "solar_cell_model.joblib"
+
+# Premium palette
+DARK = "#0A1714"
+PANEL = "#12231E"
+PANEL_LIGHT = "#182D26"
+GOLD = "#E6B85C"
+CREAM = "#F4F2E9"
+MUTED = "#A5B7AD"
+GREEN = "#8AD4A0"
+
+
+# =========================================================
+# CUSTOM DESIGN
+# =========================================================
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+    :root {
+        --bg: #0A1714;
+        --panel: #12231E;
+        --panel2: #182D26;
+        --gold: #E6B85C;
+        --cream: #F4F2E9;
+        --muted: #A5B7AD;
+        --green: #8AD4A0;
+    }
+
+    html, body, [class*="css"] {
+        font-family: 'DM Sans', sans-serif;
+    }
+
     .stApp {
-        background-color: #F8F7F2;
-        color: #102B2A;
+        background:
+            radial-gradient(ellipse at 85% 0%, rgba(48, 104, 75, 0.18), transparent 35%),
+            radial-gradient(ellipse at 0% 20%, rgba(230, 184, 92, 0.06), transparent 25%),
+            var(--bg);
+        color: var(--cream);
     }
 
     [data-testid="stHeader"] {
-        background-color: #F8F7F2;
+        background: transparent;
     }
 
-    h1, h2, h3 {
-        color: #102B2A !important;
+    [data-testid="stAppViewContainer"] > .main {
+        background: transparent;
+    }
+
+    .block-container {
+        max-width: 1200px;
+        padding-top: 1.7rem;
+        padding-bottom: 3rem;
+    }
+
+    h1, h2, h3, h4 {
+        font-family: 'Space Grotesk', sans-serif !important;
+        color: var(--cream) !important;
+        letter-spacing: -0.6px;
+    }
+
+    p, label, li {
+        color: var(--muted);
+    }
+
+    .brandbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 5px 0 25px 0;
+        border-bottom: 1px solid rgba(244,242,233,0.10);
+        margin-bottom: 28px;
+    }
+
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--cream);
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 19px;
+        font-weight: 700;
+    }
+
+    .brand-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 40px;
+        width: 40px;
+        border-radius: 13px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 23px;
+    }
+
+    .brand-sub {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        text-align: right;
     }
 
     .hero {
-        background: linear-gradient(120deg, #102B2A, #24554B);
-        padding: 30px;
-        border-radius: 18px;
-        color: #F8F7F2;
-        margin-bottom: 22px;
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(230,184,92,0.23);
+        border-radius: 25px;
+        padding: 42px 38px;
+        background:
+            radial-gradient(circle at 88% 25%, rgba(230,184,92,0.17), transparent 22%),
+            radial-gradient(circle at 100% 100%, rgba(78,157,111,0.22), transparent 42%),
+            linear-gradient(120deg, #142921, #0E1C17 70%);
+        margin-bottom: 26px;
+    }
+
+    .eyebrow {
+        display: inline-block;
+        border: 1px solid rgba(230,184,92,0.35);
+        color: var(--gold);
+        padding: 7px 12px;
+        border-radius: 100px;
+        font-size: 11px;
+        letter-spacing: 1.7px;
+        text-transform: uppercase;
+        margin-bottom: 19px;
     }
 
     .hero h1 {
-        color: #F8F7F2 !important;
+        font-size: clamp(35px, 5vw, 57px) !important;
+        line-height: 1.08 !important;
+        max-width: 720px;
+        margin: 0 0 18px 0 !important;
+    }
+
+    .hero h1 span {
+        color: var(--gold);
+    }
+
+    .hero-copy {
+        max-width: 650px;
+        font-size: 16px;
+        line-height: 1.8;
+        color: #BDCCC3;
+        margin-bottom: 25px;
+    }
+
+    .hero-foot {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .hero-pill {
+        background: rgba(244,242,233,0.06);
+        border: 1px solid rgba(244,242,233,0.12);
+        padding: 9px 12px;
+        border-radius: 9px;
+        color: #E2E9E2;
+        font-size: 12px;
+    }
+
+    .section-kicker {
+        color: var(--gold);
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-size: 11px;
+        font-weight: 700;
         margin-bottom: 8px;
     }
 
-    .hero p {
-        color: #E8F0E9;
-        font-size: 16px;
+    .section-intro {
+        color: var(--muted);
+        line-height: 1.7;
+        margin-top: -5px;
+        margin-bottom: 20px;
     }
 
-    .result-card {
-        background: #E8F0E9;
-        border-left: 6px solid #D9A441;
-        padding: 22px;
-        border-radius: 12px;
-        margin-top: 15px;
+    .feature-card {
+        background: linear-gradient(145deg, var(--panel), #0F1E19);
+        border: 1px solid rgba(244,242,233,0.09);
+        border-radius: 17px;
+        padding: 20px;
+        min-height: 135px;
     }
 
-    .small-note {
-        color: #53645F;
-        font-size: 14px;
-    }
-
-    div.stButton > button[kind="primary"] {
-        background-color: #D9A441;
-        color: #102B2A;
-        border: none;
+    .feature-number {
+        color: var(--gold);
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 25px;
         font-weight: 700;
-        border-radius: 9px;
-        min-height: 45px;
+        margin-bottom: 8px;
     }
 
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #C38D2D;
-        color: #102B2A;
+    .feature-title {
+        color: var(--cream);
+        font-weight: 700;
+        margin-bottom: 7px;
     }
 
-    div[data-testid="stMetric"] {
-        background: #FFFFFF;
-        padding: 18px;
+    .feature-desc {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+    }
+
+    div[data-testid="stForm"] {
+        background: linear-gradient(145deg, rgba(18,35,30,0.98), rgba(14,28,23,0.98));
+        border: 1px solid rgba(244,242,233,0.10);
+        border-radius: 19px;
+        padding: 25px;
+    }
+
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stNumberInput"] label {
+        color: #DCE6DE !important;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input {
+        background: #0B1914 !important;
+        color: #F4F2E9 !important;
+        border: 1px solid #30473B !important;
+        border-radius: 10px !important;
+        min-height: 43px;
+    }
+
+    div[data-testid="stTextInput"] input:focus,
+    div[data-testid="stNumberInput"] input:focus {
+        border-color: var(--gold) !important;
+        box-shadow: 0 0 0 1px var(--gold) !important;
+    }
+
+    div[data-testid="stTextInput"] input::placeholder {
+        color: #73887B !important;
+    }
+
+    .stButton > button,
+    div[data-testid="stFormSubmitButton"] > button,
+    div[data-testid="stDownloadButton"] > button {
+        background: var(--gold) !important;
+        color: #102019 !important;
+        border: 0 !important;
+        border-radius: 11px !important;
+        font-weight: 700 !important;
+        min-height: 47px;
+        transition: all 0.2s ease;
+    }
+
+    .stButton > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover {
+        background: #F2CD7A !important;
+        transform: translateY(-1px);
+    }
+
+    .result-panel {
+        background:
+            radial-gradient(circle at 90% 0%, rgba(230,184,92,0.14), transparent 32%),
+            linear-gradient(145deg, #18382A, #10221A);
+        border: 1px solid rgba(138,212,160,0.25);
+        border-radius: 21px;
+        padding: 28px;
+        margin: 20px 0;
+    }
+
+    .result-label {
+        color: #BDCCC3;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+
+    .result-value {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: clamp(38px, 6vw, 60px);
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1.15;
+        padding: 12px 0;
+        overflow-wrap: anywhere;
+    }
+
+    .result-caption {
+        color: #BDCCC3;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+
+    .note {
+        border: 1px solid rgba(230,184,92,0.20);
+        background: rgba(230,184,92,0.06);
+        padding: 14px 16px;
+        border-radius: 11px;
+        color: #D7DCD2;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+
+    .footer {
+        border-top: 1px solid rgba(244,242,233,0.10);
+        padding-top: 22px;
+        margin-top: 40px;
+        color: #82978A;
+        font-size: 12px;
+        line-height: 1.8;
+    }
+
+    div[data-testid="stAlert"] {
         border-radius: 12px;
-        border: 1px solid #E0E6DF;
     }
 
+    #MainMenu, footer {
+        visibility: hidden;
+    }
+
+    @media (max-width: 700px) {
+        .hero {
+            padding: 27px 22px;
+        }
+        .brand-sub {
+            display: none;
+        }
+        div[data-testid="stForm"] {
+            padding: 15px;
+        }
+    }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
-# --------------------------------------------------
-# LOAD THE GOOGLE COLAB MODEL
-# Keep this file in the same GitHub folder as app.py.
-# --------------------------------------------------
-MODEL_PATH = Path(__file__).parent / "solar_cell_model.joblib"
 
-
+# =========================================================
+# MODEL LOADING
+# =========================================================
 @st.cache_resource
-def load_model():
-    return joblib.load(MODEL_PATH)
+def load_model(model_path, modified_time):
+    # modified_time lets Streamlit reload the model if the file changes.
+    return joblib.load(model_path)
 
 
-# --------------------------------------------------
-# HELPER FUNCTIONS
-# --------------------------------------------------
-def get_model_feature_names(loaded_model):
-    """Get the feature names the saved model expects."""
-
+def get_feature_names(loaded_model):
+    """Find the original feature columns expected by the saved model."""
     if hasattr(loaded_model, "feature_names_in_"):
-        return list(loaded_model.feature_names_in_)
+        return [str(x) for x in loaded_model.feature_names_in_]
 
-    # A saved sklearn Pipeline may expose feature names
-    # through its preprocessing or model steps.
     if hasattr(loaded_model, "named_steps"):
         for step in loaded_model.named_steps.values():
             if hasattr(step, "feature_names_in_"):
-                return list(step.feature_names_in_)
+                return [str(x) for x in step.feature_names_in_]
 
     return None
 
 
 def get_categorical_columns(loaded_model):
-    """
-    Try to identify categorical columns from a
-    scikit-learn Pipeline containing a ColumnTransformer.
-    """
-    categorical = set()
+    """Try to detect categorical features in a fitted sklearn pipeline."""
+    found = set()
 
     if not hasattr(loaded_model, "named_steps"):
-        return categorical
+        return found
 
     for step in loaded_model.named_steps.values():
         transformers = getattr(step, "transformers_", None)
@@ -141,313 +394,417 @@ def get_categorical_columns(loaded_model):
             if name == "remainder" or transformer == "drop":
                 continue
 
-            transformer_name = str(type(transformer)).lower()
+            transformer_type = type(transformer).__name__.lower()
+            is_categorical = (
+                "categorical" in str(name).lower()
+                or "onehot" in transformer_type
+                or "ordinal" in transformer_type
+            )
 
-            if (
-                "categorical" in name.lower()
-                or "onehot" in transformer_name
-                or "ordinal" in transformer_name
+            if is_categorical and isinstance(
+                columns, (list, tuple, np.ndarray, pd.Index)
             ):
-                if isinstance(columns, (list, tuple, np.ndarray, pd.Index)):
-                    categorical.update(str(col) for col in columns)
+                found.update(str(c) for c in columns)
 
-    return categorical
+    return found
 
 
-def is_probably_categorical(feature_name, categorical_columns):
-    """Fallback when the saved model does not expose column types."""
-
-    if feature_name in categorical_columns:
+def looks_categorical(name, categorical_columns):
+    if name in categorical_columns:
         return True
 
-    name = feature_name.lower()
-
-    categorical_words = [
-        "material",
-        "composition",
-        "substrate",
-        "architecture",
-        "structure",
-        "type",
-        "method",
-        "technique",
-        "process",
-        "layer",
-        "solvent",
-        "electrode",
-        "additive",
-        "category"
-    ]
-
-    return any(word in name for word in categorical_words)
+    keywords = (
+        "material", "composition", "substrate", "architecture",
+        "structure", "method", "technique", "process", "solvent",
+        "electrode", "additive", "category", "type", "layer",
+        "cell_name", "device"
+    )
+    lowered = name.lower()
+    return any(word in lowered for word in keywords)
 
 
-def display_feature_name(name):
-    """Make column names easier to read on the website."""
-
+def nice_name(name):
     return str(name).replace("_", " ").replace("-", " ").strip().title()
 
 
-# --------------------------------------------------
-# HEADER
-# --------------------------------------------------
+def safe_error(error):
+    return html.escape(str(error))
+
+
+# =========================================================
+# TOP NAVIGATION
+# =========================================================
+st.markdown(
+    """
+    <div class="brandbar">
+        <div class="brand">
+            <div class="brand-icon">☀</div>
+            <div>
+                SolarCell<span style="color:#E6B85C"> AI</span>
+                <div style="font-size:10px;color:#A5B7AD;letter-spacing:2px;font-weight:500">
+                    MATERIAL INTELLIGENCE
+                </div>
+            </div>
+        </div>
+        <div class="brand-sub">
+            RESEARCH • MATERIALS • PERFORMANCE
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# HERO SECTION
+# =========================================================
 st.markdown(
     """
     <div class="hero">
-        <h1>☀️ SolarCell AI Optimizer</h1>
-        <p>
-            Explore solar-cell material and process inputs with
-            an XGBoost model trained in Google Colab.
-        </p>
+        <div class="eyebrow">✦ AI-POWERED SOLAR RESEARCH</div>
+        <h1>Engineer the next<br>generation of <span>solar.</span></h1>
+        <div class="hero-copy">
+            Explore your solar-cell design inputs with a trained
+            XGBoost model. Turn material and process parameters into
+            a model-based prediction to support your research.
+        </div>
+        <div class="hero-foot">
+            <span class="hero-pill">⚡ XGBoost prediction</span>
+            <span class="hero-pill">◈ Your saved Colab model</span>
+            <span class="hero-pill">↗ CSV not required</span>
+        </div>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
-st.write(
-    "Enter the properties of your proposed solar-cell design. "
-    "The saved machine-learning model will estimate its output."
+
+# =========================================================
+# VALUE PROPOSITION
+# =========================================================
+st.markdown('<div class="section-kicker">THE WORKFLOW</div>', unsafe_allow_html=True)
+st.markdown("## From design parameters to insight")
+st.markdown(
+    '<div class="section-intro">A simple interface for exploring your trained model — '
+    'without retraining it every time you open the website.</div>',
+    unsafe_allow_html=True,
 )
 
-st.info(
-    "The fields below are blank intentionally. The placeholders are "
-    "guidance only, not recommended values. Use values and units "
-    "consistent with the dataset used to train your model."
+card1, card2, card3 = st.columns(3)
+
+with card1:
+    st.markdown(
+        """
+        <div class="feature-card">
+            <div class="feature-number">01</div>
+            <div class="feature-title">Define your design</div>
+            <div class="feature-desc">
+                Enter the material and process values required by your trained model.
+                No hidden default values.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with card2:
+    st.markdown(
+        """
+        <div class="feature-card">
+            <div class="feature-number">02</div>
+            <div class="feature-title">Run the AI model</div>
+            <div class="feature-desc">
+                The website loads your saved model from Google Colab using joblib
+                and generates a prediction.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with card3:
+    st.markdown(
+        """
+        <div class="feature-card">
+            <div class="feature-number">03</div>
+            <div class="feature-title">Review the output</div>
+            <div class="feature-desc">
+                Inspect the result and export the entered parameters with the
+                model prediction for your records.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# LOAD SAVED MODEL
+# =========================================================
+st.markdown("---")
+st.markdown('<div class="section-kicker">MODEL LAB</div>', unsafe_allow_html=True)
+st.markdown("## Solar-cell prediction studio")
+st.markdown(
+    '<div class="section-intro">Enter the values used by your training dataset. '
+    'Field names are taken from the saved model whenever available.</div>',
+    unsafe_allow_html=True,
 )
 
-# --------------------------------------------------
-# CHECK AND LOAD MODEL
-# --------------------------------------------------
 if not MODEL_PATH.exists():
     st.error(
-        "The trained model file was not found. Upload "
-        "'solar_cell_model.joblib' to the same GitHub repository "
-        "folder as app.py."
+        "Model file not found. Upload solar_cell_model.joblib to the same "
+        "GitHub repository folder as app.py."
     )
     st.stop()
 
 try:
-    model = load_model()
+    model = load_model(str(MODEL_PATH), MODEL_PATH.stat().st_mtime)
 except Exception as error:
     st.error("The saved model could not be loaded.")
     st.code(str(error))
-    st.caption(
-        "Check the Python and package versions used in Google Colab "
-        "against the versions in requirements.txt."
+    st.markdown(
+        '<div class="note">Check that the model file was exported successfully '
+        'from Google Colab and that the Python and package versions are compatible.</div>',
+        unsafe_allow_html=True,
     )
     st.stop()
 
-
-feature_names = get_model_feature_names(model)
+feature_names = get_feature_names(model)
 
 if not feature_names:
     st.error(
-        "The app could not automatically read the model's input column "
-        "names. The model may not expose feature_names_in_. To make "
-        "the form match your model exactly, the original training "
-        "feature names are needed."
+        "This model does not expose its original feature names. "
+        "The form cannot safely guess the required columns. Please check the "
+        "Google Colab training notebook and save the feature column names "
+        "alongside the model."
     )
     st.stop()
 
 categorical_columns = get_categorical_columns(model)
 
-# --------------------------------------------------
-# INPUT FORM
-# --------------------------------------------------
-st.subheader("1. Solar-cell design inputs")
-st.caption(
-    "Complete each field. For numeric fields, enter a number. "
-    "For material or process fields, enter the category used in training."
+st.markdown(
+    f"""
+    <div class="note">
+        <b style="color:#E6B85C">READY TO PREDICT</b><br>
+        The saved model is loaded. It expects {len(feature_names)} input
+        feature(s). Complete the fields below using the same units and
+        category names used during training.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-with st.form("solar_cell_prediction_form"):
+st.write("")
 
-    user_values = {}
-
-    # Two columns keep the form easy to read.
-    left_col, right_col = st.columns(2)
-
-    for index, feature in enumerate(feature_names):
-        feature = str(feature)
-        label = display_feature_name(feature)
-
-        target_col = left_col if index % 2 == 0 else right_col
-
-        with target_col:
-            if is_probably_categorical(feature, categorical_columns):
-                user_values[feature] = st.text_input(
-                    label,
-                    value="",
-                    placeholder=f"Enter {label.lower()}",
-                    help=(
-                        "Use the same category names or spelling "
-                        "as the data used to train the model."
-                    ),
-                    key=f"input_{index}"
-                )
-            else:
-                user_values[feature] = st.text_input(
-                    label,
-                    value="",
-                    placeholder=f"Enter {label.lower()}",
-                    help=(
-                        "Enter a numeric value in the same units "
-                        "used during model training."
-                    ),
-                    key=f"input_{index}"
-                )
-
-    submitted = st.form_submit_button(
-        "☀️ Predict Solar-Cell Efficiency",
-        type="primary",
-        use_container_width=True
+# =========================================================
+# FORM WITH PLACEHOLDERS
+# =========================================================
+with st.form("solar_design_form", clear_on_submit=False):
+    st.markdown("### Design parameters")
+    st.caption(
+        "Fields are intentionally blank. Placeholder text is an example of what "
+        "to enter, not a recommended material recipe."
     )
 
-# --------------------------------------------------
-# PREDICTION
-# --------------------------------------------------
-if submitted:
+    values = {}
 
-    missing_fields = []
-    invalid_fields = []
-    prediction_values = {}
+    left, right = st.columns(2, gap="large")
+
+    for index, feature in enumerate(feature_names):
+        label = nice_name(feature)
+        target_column = left if index % 2 == 0 else right
+
+        with target_column:
+            if looks_categorical(feature, categorical_columns):
+                values[feature] = st.text_input(
+                    label,
+                    value="",
+                    placeholder=f"Enter {label.lower()}",
+                    help=(
+                        "Use a category that is represented in the data "
+                        "used to train the model."
+                    ),
+                    key=f"feature_{index}",
+                )
+            else:
+                values[feature] = st.text_input(
+                    label,
+                    value="",
+                    placeholder=f"Enter numeric {label.lower()}",
+                    help=(
+                        "Enter a number in the same units used during training. "
+                        "Do not enter the unit in the box."
+                    ),
+                    key=f"feature_{index}",
+                )
+
+    st.write("")
+    submitted = st.form_submit_button(
+        "✦  Generate AI prediction",
+        use_container_width=True,
+        type="primary",
+    )
+
+
+# =========================================================
+# PREDICTION RESULT
+# =========================================================
+if submitted:
+    missing = []
+    invalid = []
+    cleaned = {}
 
     for feature in feature_names:
-        raw_value = str(user_values[feature]).strip()
+        raw = str(values[feature]).strip()
 
-        if not raw_value:
-            missing_fields.append(display_feature_name(feature))
+        if not raw:
+            missing.append(nice_name(feature))
             continue
 
-        if is_probably_categorical(feature, categorical_columns):
-            prediction_values[feature] = raw_value
+        if looks_categorical(feature, categorical_columns):
+            cleaned[feature] = raw
         else:
             try:
-                number = float(raw_value)
-
+                number = float(raw)
                 if not np.isfinite(number):
-                    raise ValueError("Value must be finite.")
-
-                prediction_values[feature] = number
-
+                    raise ValueError
+                cleaned[feature] = number
             except (ValueError, TypeError):
-                invalid_fields.append(display_feature_name(feature))
+                invalid.append(nice_name(feature))
 
-    if missing_fields:
-        st.error(
-            "Please complete these required fields: "
-            + ", ".join(missing_fields)
-        )
+    if missing:
+        st.error("Complete these fields before predicting: " + ", ".join(missing))
 
-    elif invalid_fields:
-        st.error(
-            "Please enter numeric values for: "
-            + ", ".join(invalid_fields)
-        )
+    elif invalid:
+        st.error("Enter valid numeric values for: " + ", ".join(invalid))
 
     else:
-        input_df = pd.DataFrame(
-            [prediction_values],
-            columns=feature_names
-        )
+        # Preserve the feature order expected by the saved model.
+        input_df = pd.DataFrame([cleaned], columns=feature_names)
 
         try:
-            prediction = model.predict(input_df)
-            predicted_value = float(np.asarray(prediction).reshape(-1)[0])
+            raw_prediction = model.predict(input_df)
+            prediction = float(np.asarray(raw_prediction).reshape(-1)[0])
 
-            if not np.isfinite(predicted_value):
+            if not np.isfinite(prediction):
                 raise ValueError("The model returned a non-finite prediction.")
 
             st.markdown("---")
-            st.subheader("2. Prediction result")
+            st.markdown('<div class="section-kicker">YOUR RESULT</div>', unsafe_allow_html=True)
+            st.markdown("## Prediction generated")
 
             st.markdown(
                 f"""
-                <div class="result-card">
-                    <p style="margin:0; color:#53645F;">
-                        Model-predicted output
-                    </p>
-                    <h2 style="color:#102B2A; margin-top:8px;">
-                        {predicted_value:.4f}
-                    </h2>
-                    <p style="margin-bottom:0; color:#53645F;">
-                        This is the raw prediction from your saved model.
-                        Confirm the target variable and units from your
-                        Google Colab training notebook before interpreting it.
-                    </p>
+                <div class="result-panel">
+                    <div class="result-label">Model-predicted output</div>
+                    <div class="result-value">{prediction:,.4f}</div>
+                    <div class="result-caption">
+                        Generated by your saved Google Colab model.
+                        This number is the model's raw output; confirm that
+                        the target trained in Colab is PCE before interpreting
+                        it as power conversion efficiency.
+                    </div>
                 </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
-            st.success(
-                "Prediction completed using the model saved from Google Colab."
-            )
+            result_col1, result_col2 = st.columns(2)
 
-            st.download_button(
-                "Download prediction as CSV",
-                data=input_df.assign(
-                    model_prediction=predicted_value
-                ).to_csv(index=False).encode("utf-8"),
-                file_name="solar_cell_prediction.csv",
-                mime="text/csv"
+            with result_col1:
+                st.markdown("#### Input summary")
+                st.write(f"**Features supplied:** {len(feature_names)}")
+                st.write("**Model:** Saved XGBoost pipeline/model")
+                st.write("**Prediction status:** Complete")
+
+            with result_col2:
+                st.markdown("#### Export your result")
+                output_df = input_df.copy()
+                output_df["model_prediction"] = prediction
+
+                st.download_button(
+                    "↓  Download prediction CSV",
+                    data=output_df.to_csv(index=False).encode("utf-8"),
+                    file_name="solar_cell_prediction.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+            st.markdown(
+                """
+                <div class="note">
+                    <b style="color:#E6B85C">SCIENTIFIC NOTE</b><br>
+                    This prediction is an estimate learned from historical training
+                    data. It is not a guarantee of experimental performance and
+                    does not independently prove that a material combination is
+                    optimal. Validate promising candidates experimentally.
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         except Exception as error:
             st.error(
-                "The model could not make a prediction with these inputs. "
-                "This can happen if a value has the wrong category, a "
-                "required feature is missing, or the saved model expects "
-                "a different input format."
+                "Prediction failed. One or more values may not match the "
+                "format or categories expected by the trained model."
             )
             st.code(str(error))
+            st.caption(
+                "If the error mentions unknown categories, check the exact "
+                "category labels in the original training dataset."
+            )
 
-# --------------------------------------------------
-# OPTIONAL DATASET
-# The CSV is not required for predictions.
-# --------------------------------------------------
+
+# =========================================================
+# OPTIONAL DATA EXPLORER
+# =========================================================
 st.markdown("---")
-st.subheader("Optional: Explore historical data")
-st.write(
-    "Upload your dataset only if you want to inspect historical records. "
-    "It is not needed to run the prediction form."
+st.markdown('<div class="section-kicker">OPTIONAL</div>', unsafe_allow_html=True)
+st.markdown("## Explore your dataset")
+st.markdown(
+    '<div class="section-intro">Your CSV is only needed for this optional '
+    'preview — not for model predictions.</div>',
+    unsafe_allow_html=True,
 )
 
 uploaded_csv = st.file_uploader(
-    "Optional CSV dataset",
+    "Upload a historical solar-cell CSV",
     type=["csv"],
-    help="Upload the dataset used in your project, if you want to view it."
+    help="Optional: upload your dataset to preview its first rows.",
 )
 
 if uploaded_csv is not None:
     try:
-        historical_data = pd.read_csv(uploaded_csv)
+        data = pd.read_csv(uploaded_csv)
 
-        st.write(f"Rows: {historical_data.shape[0]:,}")
-        st.write(f"Columns: {historical_data.shape[1]:,}")
+        metric1, metric2 = st.columns(2)
+        metric1.metric("Records", f"{len(data):,}")
+        metric2.metric("Columns", f"{len(data.columns):,}")
 
-        st.dataframe(
-            historical_data.head(10),
-            use_container_width=True
-        )
+        st.dataframe(data.head(10), use_container_width=True)
 
     except Exception as error:
-        st.error("The uploaded CSV could not be read.")
+        st.error("Could not read this CSV file.")
         st.code(str(error))
 
-# --------------------------------------------------
+
+# =========================================================
 # FOOTER
-# --------------------------------------------------
-st.markdown("---")
+# =========================================================
 st.markdown(
     """
-    <p class="small-note">
-        <b>About this project</b><br>
-        This application uses a pretrained XGBoost-based model exported
-        from Google Colab with joblib. Predictions are estimates based
-        on patterns learned from the training data; they are not
-        guarantees of real-world experimental performance.
-    </p>
+    <div class="footer">
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:16px;
+                    color:#F4F2E9;font-weight:700;margin-bottom:7px">
+            ☀ SolarCell <span style="color:#E6B85C">AI</span>
+        </div>
+        AI-based solar-cell material exploration.<br>
+        Built with Streamlit, Python and a pretrained model exported using joblib.<br><br>
+        <span style="color:#647B6D">
+            Research support only • Predictions depend on the training data and
+            model limitations • Experimental validation is essential
+        </span>
+    </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
