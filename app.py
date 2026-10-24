@@ -1,247 +1,453 @@
-from pathlib import Path
-import io
-import numpy as np
-import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import pandas as pd
 import joblib
+from pathlib import Path
+import numpy as np
 
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+# --------------------------------------------------
+# PAGE SETTINGS
+# --------------------------------------------------
+st.set_page_config(
+    page_title="SolarCell AI Optimizer",
+    page_icon="☀️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-TARGET = "JV_default_PCE"
-LEAKAGE_COLUMNS = ["JV_default_Voc", "JV_default_Jsc", "JV_default_FF", "JV_measured"]
-DEFAULT_DATASET = "Solar Cell data set (1).csv"
+# --------------------------------------------------
+# DESIGN
+# --------------------------------------------------
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: #F8F7F2;
+        color: #102B2A;
+    }
 
-st.set_page_config(page_title="SolarCell AI | Material Intelligence", page_icon="☀️", layout="wide", initial_sidebar_state="expanded")
+    [data-testid="stHeader"] {
+        background-color: #F8F7F2;
+    }
 
-# Solar-inspired visual identity: forest green, warm ivory, and solar gold.
-st.markdown("""
-<style>
-:root { --forest: #102B2A; --forest2: #1D4840; --gold: #D9A441; --sage: #E8F0E9; --ivory: #F8F7F2; --ink: #173532; }
-.stApp { background: var(--ivory); color: var(--ink); }
-[data-testid="stHeader"] { background: rgba(248,247,242,0.92); }
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #102B2A 0%, #183C35 100%); }
-[data-testid="stSidebar"] * { color: #F8F7F2 !important; }
-[data-testid="stSidebar"] [data-testid="stFileUploader"] section { background: rgba(255,255,255,0.08); }
-.block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1240px; }
-.hero { background: linear-gradient(120deg, #102B2A 0%, #1D4840 72%, #315D4B 100%); padding: 2.2rem 2.4rem; border-radius: 24px; color: #F8F7F2; margin-bottom: 1.4rem; border: 1px solid rgba(217,164,65,.35); box-shadow: 0 14px 35px rgba(16,43,42,.12); }
-.hero-kicker { color: #E7BD67; text-transform: uppercase; letter-spacing: .16em; font-size: .76rem; font-weight: 700; margin-bottom: .65rem; }
-.hero h1 { color: #FFFFFF; font-size: clamp(2rem, 4vw, 3.15rem); line-height: 1.08; letter-spacing: -.035em; margin: 0 0 .8rem 0; }
-.hero p { color: #D5E2DC; font-size: 1.03rem; max-width: 760px; margin-bottom: .2rem; }
-.pill { display: inline-block; border: 1px solid rgba(217,164,65,.6); color: #F0D28D; border-radius: 999px; padding: .32rem .7rem; font-size: .75rem; margin: .9rem .35rem 0 0; }
-.section-label { color: #B48628; text-transform: uppercase; letter-spacing: .12em; font-size: .72rem; font-weight: 800; margin-bottom: .25rem; }
-.panel { background: white; border: 1px solid #DCE5DC; border-radius: 18px; padding: 1.1rem 1.25rem; }
-h2, h3 { color: #173532; letter-spacing: -.02em; }
-[data-testid="stMetric"] { background: white; border: 1px solid #DCE5DC; padding: 1rem 1.1rem; border-radius: 16px; box-shadow: 0 4px 14px rgba(16,43,42,.035); }
-[data-testid="stMetricLabel"] { color: #61756A; }
-[data-testid="stMetricValue"] { color: #1D4840; }
-.stButton > button, .stFormSubmitButton > button, [data-testid="stDownloadButton"] button { background: #D9A441; color: #102B2A; border: 0; border-radius: 11px; font-weight: 750; min-height: 2.8rem; }
-.stButton > button:hover, .stFormSubmitButton > button:hover, [data-testid="stDownloadButton"] button:hover { background: #E7BD67; color: #102B2A; border: 0; }
-[data-baseweb="select"] > div, [data-testid="stNumberInput"] input, [data-testid="stTextInput"] input { border-radius: 10px; }
-[data-testid="stDataFrame"] { border: 1px solid #DCE5DC; border-radius: 14px; overflow: hidden; }
-hr { border-color: #DCE5DC; }
-footer { visibility: hidden; }
-</style>
-<div class="hero">
-  <div class="hero-kicker">☀ Material intelligence platform</div>
-  <h1>Engineer better<br>solar cells.</h1>
-  <p>Explore solar-cell recipes with machine learning. Estimate power conversion efficiency, compare promising candidates, and turn historical research data into practical next steps.</p>
-  <span class="pill">XGBoost regression</span><span class="pill">PCE prediction</span><span class="pill">Recipe exploration</span>
-</div>
-""", unsafe_allow_html=True)
+    h1, h2, h3 {
+        color: #102B2A !important;
+    }
 
+    .hero {
+        background: linear-gradient(120deg, #102B2A, #24554B);
+        padding: 30px;
+        border-radius: 18px;
+        color: #F8F7F2;
+        margin-bottom: 22px;
+    }
 
-def infer_columns(frame: pd.DataFrame, columns):
-    numeric, categorical = [], []
-    for col in columns:
-        original = frame[col]
-        converted = pd.to_numeric(original, errors="coerce")
-        nonmissing = original.notna().sum()
-        ratio = converted.notna().sum() / max(nonmissing, 1)
-        if pd.api.types.is_numeric_dtype(original) or (nonmissing > 0 and ratio >= 0.80):
-            numeric.append(col)
-        else:
-            categorical.append(col)
-    return numeric, categorical
+    .hero h1 {
+        color: #F8F7F2 !important;
+        margin-bottom: 8px;
+    }
 
+    .hero p {
+        color: #E8F0E9;
+        font-size: 16px;
+    }
 
-def clean_dataset(raw: pd.DataFrame):
-    if TARGET not in raw.columns:
-        raise ValueError(f"Dataset must contain the target column '{TARGET}'.")
-    df = raw.copy()
-    df[TARGET] = pd.to_numeric(df[TARGET], errors="coerce")
-    if "JV_measured" in df.columns:
-        measured = df["JV_measured"].astype(str).str.strip().str.lower().isin(["true", "1", "yes", "y"])
-        # If the column is interpretable, use only measured rows.
-        if measured.any():
-            df = df[measured]
-    df = df[df[TARGET].notna() & (df[TARGET] > 0)].copy()
-    feature_cols = [c for c in df.columns if c != TARGET and c not in LEAKAGE_COLUMNS]
-    if not feature_cols:
-        raise ValueError("No usable input feature columns were found.")
-    numeric_cols, categorical_cols = infer_columns(df, feature_cols)
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    for col in categorical_cols:
-        df[col] = df[col].where(df[col].notna(), np.nan)
-        df[col] = df[col].map(lambda x: str(x).strip() if pd.notna(x) else np.nan)
-        df.loc[df[col].isin(["", "nan", "None", "NaN"]), col] = np.nan
-    return df, feature_cols, numeric_cols, categorical_cols
+    .result-card {
+        background: #E8F0E9;
+        border-left: 6px solid #D9A441;
+        padding: 22px;
+        border-radius: 12px;
+        margin-top: 15px;
+    }
+
+    .small-note {
+        color: #53645F;
+        font-size: 14px;
+    }
+
+    div.stButton > button[kind="primary"] {
+        background-color: #D9A441;
+        color: #102B2A;
+        border: none;
+        font-weight: 700;
+        border-radius: 9px;
+        min-height: 45px;
+    }
+
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #C38D2D;
+        color: #102B2A;
+    }
+
+    div[data-testid="stMetric"] {
+        background: #FFFFFF;
+        padding: 18px;
+        border-radius: 12px;
+        border: 1px solid #E0E6DF;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --------------------------------------------------
+# LOAD THE GOOGLE COLAB MODEL
+# Keep this file in the same GitHub folder as app.py.
+# --------------------------------------------------
+MODEL_PATH = Path(__file__).parent / "solar_cell_model.joblib"
 
 
-@st.cache_resource(show_spinner="Loading the Colab-trained XGBoost model…")
+@st.cache_resource
 def load_model():
-    model_path = Path(__file__).parent / "solar_cell_model.joblib"
-    if not model_path.exists():
-        raise FileNotFoundError(
-            "solar_cell_model.joblib was not found. Upload it to the same GitHub folder as app.py."
-        )
-    return joblib.load(model_path)
+    return joblib.load(MODEL_PATH)
 
 
-st.sidebar.markdown("## ☀ SolarCell AI")
-st.sidebar.caption("MATERIAL INTELLIGENCE")
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Dataset source")
-repo_path = Path(__file__).parent / DEFAULT_DATASET
-uploaded = st.sidebar.file_uploader("Upload the solar-cell CSV", type=["csv"])
-if uploaded is not None:
-    csv_bytes = uploaded.getvalue()
-elif repo_path.exists():
-    csv_bytes = repo_path.read_bytes()
-else:
-    st.info(
-        f"To run the public website, add **{DEFAULT_DATASET}** to the same GitHub repository as `app.py`. "
-        "For a quick local test, upload the CSV using the sidebar."
+# --------------------------------------------------
+# HELPER FUNCTIONS
+# --------------------------------------------------
+def get_model_feature_names(loaded_model):
+    """Get the feature names the saved model expects."""
+
+    if hasattr(loaded_model, "feature_names_in_"):
+        return list(loaded_model.feature_names_in_)
+
+    # A saved sklearn Pipeline may expose feature names
+    # through its preprocessing or model steps.
+    if hasattr(loaded_model, "named_steps"):
+        for step in loaded_model.named_steps.values():
+            if hasattr(step, "feature_names_in_"):
+                return list(step.feature_names_in_)
+
+    return None
+
+
+def get_categorical_columns(loaded_model):
+    """
+    Try to identify categorical columns from a
+    scikit-learn Pipeline containing a ColumnTransformer.
+    """
+    categorical = set()
+
+    if not hasattr(loaded_model, "named_steps"):
+        return categorical
+
+    for step in loaded_model.named_steps.values():
+        transformers = getattr(step, "transformers_", None)
+
+        if transformers is None:
+            continue
+
+        for name, transformer, columns in transformers:
+            if name == "remainder" or transformer == "drop":
+                continue
+
+            transformer_name = str(type(transformer)).lower()
+
+            if (
+                "categorical" in name.lower()
+                or "onehot" in transformer_name
+                or "ordinal" in transformer_name
+            ):
+                if isinstance(columns, (list, tuple, np.ndarray, pd.Index)):
+                    categorical.update(str(col) for col in columns)
+
+    return categorical
+
+
+def is_probably_categorical(feature_name, categorical_columns):
+    """Fallback when the saved model does not expose column types."""
+
+    if feature_name in categorical_columns:
+        return True
+
+    name = feature_name.lower()
+
+    categorical_words = [
+        "material",
+        "composition",
+        "substrate",
+        "architecture",
+        "structure",
+        "type",
+        "method",
+        "technique",
+        "process",
+        "layer",
+        "solvent",
+        "electrode",
+        "additive",
+        "category"
+    ]
+
+    return any(word in name for word in categorical_words)
+
+
+def display_feature_name(name):
+    """Make column names easier to read on the website."""
+
+    return str(name).replace("_", " ").replace("-", " ").strip().title()
+
+
+# --------------------------------------------------
+# HEADER
+# --------------------------------------------------
+st.markdown(
+    """
+    <div class="hero">
+        <h1>☀️ SolarCell AI Optimizer</h1>
+        <p>
+            Explore solar-cell material and process inputs with
+            an XGBoost model trained in Google Colab.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.write(
+    "Enter the properties of your proposed solar-cell design. "
+    "The saved machine-learning model will estimate its output."
+)
+
+st.info(
+    "The fields below are blank intentionally. The placeholders are "
+    "guidance only, not recommended values. Use values and units "
+    "consistent with the dataset used to train your model."
+)
+
+# --------------------------------------------------
+# CHECK AND LOAD MODEL
+# --------------------------------------------------
+if not MODEL_PATH.exists():
+    st.error(
+        "The trained model file was not found. Upload "
+        "'solar_cell_model.joblib' to the same GitHub repository "
+        "folder as app.py."
     )
     st.stop()
 
 try:
-    raw = pd.read_csv(io.BytesIO(csv_bytes), low_memory=False)
-    df, dataset_feature_cols, numeric_cols, categorical_cols = clean_dataset(raw)
     model = load_model()
-    # The saved sklearn pipeline remembers the feature names used during Colab training.
-    feature_cols = list(getattr(model, "feature_names_in_", dataset_feature_cols))
-    missing = [c for c in feature_cols if c not in df.columns]
-    if missing:
-        raise ValueError("The CSV is missing model input columns: " + ", ".join(missing[:8]))
-    df = df.copy()
-    for col in feature_cols:
-        if col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    candidates = df[feature_cols].copy()
-    candidates["Predicted_PCE"] = model.predict(candidates[feature_cols])
-    candidates = candidates.sort_values("Predicted_PCE", ascending=False)
-except Exception as exc:
-    st.error(f"Could not load the saved model or dataset: {exc}")
+except Exception as error:
+    st.error("The saved model could not be loaded.")
+    st.code(str(error))
+    st.caption(
+        "Check the Python and package versions used in Google Colab "
+        "against the versions in requirements.txt."
+    )
     st.stop()
 
-with st.expander("Model information", expanded=False):
-    a, b = st.columns(2)
-    a.metric("Usable records", f"{len(df):,}")
-    b.metric("Input features", len(feature_cols))
-    st.success("Using the XGBoost pipeline saved from Google Colab. The website does not retrain the model on each launch.")
-    st.caption("Candidate rankings are predictions for records in the uploaded/repository dataset, not newly discovered materials or proof of experimental improvement.")
 
-st.markdown("<div class='section-label'>01 / Define your experiment</div>", unsafe_allow_html=True)
-st.header("Enter your solar-cell recipe")
-st.caption("Enter the recipe details you know. Select a value from the dataset or choose “Enter a custom value…” for a material/process not listed. Unknown or blank details are imputed by the trained pipeline; predictions for unfamiliar recipes may be less reliable.")
-with st.form("recipe_form"):
-    values = {}
-    columns = st.columns(2)
-    for i, col in enumerate(feature_cols):
-        with columns[i % 2]:
-            series = df[col]
-            if col in numeric_cols:
-                numeric_series = pd.to_numeric(series, errors="coerce").dropna()
-                if numeric_series.empty:
-                    values[col] = st.number_input(col, value=0.0, key=f"input_{col}")
-                else:
-                    median = float(numeric_series.median())
-                    lo, hi = float(numeric_series.min()), float(numeric_series.max())
-                    if not np.isfinite(median): median = 0.0
-                    if not np.isfinite(lo): lo = median
-                    if not np.isfinite(hi): hi = median
-                    step = 0.1 if abs(hi - lo) < 100 else 1.0
-                    values[col] = st.number_input(
-                        col, min_value=lo, max_value=hi, value=min(max(median, lo), hi),
-                        step=step, key=f"input_{col}"
-                    )
+feature_names = get_model_feature_names(model)
+
+if not feature_names:
+    st.error(
+        "The app could not automatically read the model's input column "
+        "names. The model may not expose feature_names_in_. To make "
+        "the form match your model exactly, the original training "
+        "feature names are needed."
+    )
+    st.stop()
+
+categorical_columns = get_categorical_columns(model)
+
+# --------------------------------------------------
+# INPUT FORM
+# --------------------------------------------------
+st.subheader("1. Solar-cell design inputs")
+st.caption(
+    "Complete each field. For numeric fields, enter a number. "
+    "For material or process fields, enter the category used in training."
+)
+
+with st.form("solar_cell_prediction_form"):
+
+    user_values = {}
+
+    # Two columns keep the form easy to read.
+    left_col, right_col = st.columns(2)
+
+    for index, feature in enumerate(feature_names):
+        feature = str(feature)
+        label = display_feature_name(feature)
+
+        target_col = left_col if index % 2 == 0 else right_col
+
+        with target_col:
+            if is_probably_categorical(feature, categorical_columns):
+                user_values[feature] = st.text_input(
+                    label,
+                    value="",
+                    placeholder=f"Enter {label.lower()}",
+                    help=(
+                        "Use the same category names or spelling "
+                        "as the data used to train the model."
+                    ),
+                    key=f"input_{index}"
+                )
             else:
-                counts = series.dropna().astype(str).value_counts()
-                options = counts.head(40).index.tolist()
-                if not options:
-                    options = ["Unknown"]
-                custom_choice = "✏️ Enter a custom value…"
-                options = options + [custom_choice]
-                selected = st.selectbox(col, options=options, index=0, key=f"input_{col}_choice")
-                if selected == custom_choice:
-                    values[col] = st.text_input(
-                        f"Custom value for {col}",
-                        value="",
-                        placeholder="Type the material or process value",
-                        key=f"input_{col}_custom",
-                    )
-                    if not values[col].strip():
-                        values[col] = np.nan
-                else:
-                    values[col] = selected
-    submitted = st.form_submit_button("Predict PCE and find optimization candidates", type="primary", use_container_width=True)
+                user_values[feature] = st.text_input(
+                    label,
+                    value="",
+                    placeholder=f"Enter {label.lower()}",
+                    help=(
+                        "Enter a numeric value in the same units "
+                        "used during model training."
+                    ),
+                    key=f"input_{index}"
+                )
 
+    submitted = st.form_submit_button(
+        "☀️ Predict Solar-Cell Efficiency",
+        type="primary",
+        use_container_width=True
+    )
+
+# --------------------------------------------------
+# PREDICTION
+# --------------------------------------------------
 if submitted:
-    input_df = pd.DataFrame([{c: values[c] for c in feature_cols}], columns=feature_cols)
-    prediction = float(model.predict(input_df)[0])
-    st.markdown("<div class='section-label'>02 / Model output</div>", unsafe_allow_html=True)
-    st.header("Prediction result")
-    st.metric("Predicted power conversion efficiency (PCE)", f"{prediction:.2f}%")
-    st.caption("This is a model estimate, not a laboratory measurement. Reliability depends on how similar the entered recipe is to examples in the dataset.")
 
-    st.markdown("<div class='section-label'>03 / Candidate exploration</div>", unsafe_allow_html=True)
-    st.header("Optimization suggestions")
-    st.write("The table below ranks recipes in your dataset that the saved model predicts will have higher PCE. These are observed dataset examples—not guaranteed improvements or newly discovered materials.")
-    higher = candidates[candidates["Predicted_PCE"] > prediction].head(10).copy()
-    if higher.empty:
-        st.warning("No held-out recipe was predicted to outperform this input. Try checking the details or exploring the highest-ranked recipes below.")
-        higher = candidates.head(10).copy()
-    shown = higher.copy()
-    shown.insert(0, "Candidate", [f"Option {i+1}" for i in range(len(shown))])
-    st.dataframe(shown.reset_index(drop=True), use_container_width=True, hide_index=True)
+    missing_fields = []
+    invalid_fields = []
+    prediction_values = {}
 
-    # Explain which input features differ from each recommended observed recipe.
-    st.subheader("What changes in the top recommendation?")
-    best = higher.iloc[0]
-    changes = []
-    for col in feature_cols:
-        before, after = values[col], best[col]
-        if pd.isna(before) and pd.isna(after):
+    for feature in feature_names:
+        raw_value = str(user_values[feature]).strip()
+
+        if not raw_value:
+            missing_fields.append(display_feature_name(feature))
             continue
-        try:
-            same = bool(np.isclose(float(before), float(after), equal_nan=True))
-        except (TypeError, ValueError):
-            same = str(before) == str(after)
-        if not same:
-            changes.append({"Input feature": col, "Your value": before, "Recommended example": after})
-    if changes:
-        st.dataframe(pd.DataFrame(changes), use_container_width=True, hide_index=True)
+
+        if is_probably_categorical(feature, categorical_columns):
+            prediction_values[feature] = raw_value
+        else:
+            try:
+                number = float(raw_value)
+
+                if not np.isfinite(number):
+                    raise ValueError("Value must be finite.")
+
+                prediction_values[feature] = number
+
+            except (ValueError, TypeError):
+                invalid_fields.append(display_feature_name(feature))
+
+    if missing_fields:
+        st.error(
+            "Please complete these required fields: "
+            + ", ".join(missing_fields)
+        )
+
+    elif invalid_fields:
+        st.error(
+            "Please enter numeric values for: "
+            + ", ".join(invalid_fields)
+        )
+
     else:
-        st.write("The top recommendation matches the entered feature values, or differences are below numeric comparison precision.")
+        input_df = pd.DataFrame(
+            [prediction_values],
+            columns=feature_names
+        )
 
-    st.download_button(
-        "Download optimization candidates as CSV",
-        data=shown.to_csv(index=False).encode("utf-8"),
-        file_name="solar_cell_optimization_candidates.csv",
-        mime="text/csv",
-    )
+        try:
+            prediction = model.predict(input_df)
+            predicted_value = float(np.asarray(prediction).reshape(-1)[0])
 
-    st.markdown("<div class='section-label'>04 / Research notes</div>", unsafe_allow_html=True)
-    st.header("Model guidance")
-    st.write(
-        "Treat these candidates as leads for further investigation. The model learns associations in historical data; it does not prove that changing one parameter causes PCE to increase. "
-        "Validate promising recipes experimentally and check that all recommended values are feasible for your fabrication process."
-    )
+            if not np.isfinite(predicted_value):
+                raise ValueError("The model returned a non-finite prediction.")
 
-st.divider()
-st.caption("SolarCell AI Optimizer · AI-based solar cell material optimization using XGBoost · Research prototype for educational demonstration")
+            st.markdown("---")
+            st.subheader("2. Prediction result")
+
+            st.markdown(
+                f"""
+                <div class="result-card">
+                    <p style="margin:0; color:#53645F;">
+                        Model-predicted output
+                    </p>
+                    <h2 style="color:#102B2A; margin-top:8px;">
+                        {predicted_value:.4f}
+                    </h2>
+                    <p style="margin-bottom:0; color:#53645F;">
+                        This is the raw prediction from your saved model.
+                        Confirm the target variable and units from your
+                        Google Colab training notebook before interpreting it.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.success(
+                "Prediction completed using the model saved from Google Colab."
+            )
+
+            st.download_button(
+                "Download prediction as CSV",
+                data=input_df.assign(
+                    model_prediction=predicted_value
+                ).to_csv(index=False).encode("utf-8"),
+                file_name="solar_cell_prediction.csv",
+                mime="text/csv"
+            )
+
+        except Exception as error:
+            st.error(
+                "The model could not make a prediction with these inputs. "
+                "This can happen if a value has the wrong category, a "
+                "required feature is missing, or the saved model expects "
+                "a different input format."
+            )
+            st.code(str(error))
+
+# --------------------------------------------------
+# OPTIONAL DATASET
+# The CSV is not required for predictions.
+# --------------------------------------------------
+st.markdown("---")
+st.subheader("Optional: Explore historical data")
+st.write(
+    "Upload your dataset only if you want to inspect historical records. "
+    "It is not needed to run the prediction form."
+)
+
+uploaded_csv = st.file_uploader(
+    "Optional CSV dataset",
+    type=["csv"],
+    help="Upload the dataset used in your project, if you want to view it."
+)
+
+if uploaded_csv is not None:
+    try:
+        historical_data = pd.read_csv(uploaded_csv)
+
+        st.write(f"Rows: {historical_data.shape[0]:,}")
+        st.write(f"Columns: {historical_data.shape[1]:,}")
+
+        st.dataframe(
+            historical_data.head(10),
+            use_container_width=True
+        )
+
+    except Exception as error:
+        st.error("The uploaded CSV could not be read.")
+        st.code(str(error))
+
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
+st.markdown("---")
+st.markdown(
+    """
+    <p class="small-note">
+        <b>About this project</b><br>
+        This application uses a pretrained XGBoost-based model exported
+        from Google Colab with joblib. Predictions are estimates based
+        on patterns learned from the training data; they are not
+        guarantees of real-world experimental performance.
+    </p>
+    """,
+    unsafe_allow_html=True
+)
