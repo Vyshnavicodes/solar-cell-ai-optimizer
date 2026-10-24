@@ -230,12 +230,12 @@ if submitted:
     input_df = pd.DataFrame([{c: values[c] for c in feature_cols}], columns=feature_cols)
     prediction = float(model.predict(input_df)[0])
     st.markdown("<div class='section-label'>02 / Model output</div>", unsafe_allow_html=True)
-st.header("Prediction result")
+    st.header("Prediction result")
     st.metric("Predicted power conversion efficiency (PCE)", f"{prediction:.2f}%")
     st.caption("This is a model estimate, not a laboratory measurement. Reliability depends on how similar the entered recipe is to examples in the dataset.")
 
     st.markdown("<div class='section-label'>03 / Candidate exploration</div>", unsafe_allow_html=True)
-st.header("Optimization suggestions")
+    st.header("Optimization suggestions")
     st.write("The table below ranks recipes from the held-out part of your dataset that the model predicts will have higher PCE. These are observed dataset examples—not guaranteed improvements or newly discovered materials.")
     higher = candidates[candidates["Predicted_PCE"] > prediction].head(10).copy()
     if higher.empty:
@@ -272,7 +272,7 @@ st.header("Optimization suggestions")
     )
 
     st.markdown("<div class='section-label'>04 / Research notes</div>", unsafe_allow_html=True)
-st.header("Model guidance")
+    st.header("Model guidance")
     st.write(
         "Treat these candidates as leads for further investigation. The model learns associations in historical data; it does not prove that changing one parameter causes PCE to increase. "
         "Validate promising recipes experimentally and check that all recommended values are feasible for your fabrication process."
