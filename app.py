@@ -1,5 +1,6 @@
 
 import os
+import re
 import warnings
 import joblib
 import numpy as np
@@ -10,9 +11,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 warnings.filterwarnings("ignore")
 
-# =====================================================
-# 1. PAGE SETTINGS
-# =====================================================
+# =========================================================
+# 1. PAGE CONFIGURATION
+# =========================================================
 
 st.set_page_config(
     page_title="SolarIQ | AI Solar Cell Optimizer",
@@ -26,9 +27,9 @@ CSV_PATH = os.path.join(BASE_DIR, "Solar Cell data set (1).csv")
 TARGET = "JV_default_PCE"
 
 
-# =====================================================
-# 2. WEBSITE DESIGN
-# =====================================================
+# =========================================================
+# 2. PREMIUM WEBSITE DESIGN
+# =========================================================
 
 st.markdown("""
 <style>
@@ -128,21 +129,20 @@ section[data-testid="stSidebar"] {
 hr {
     border-color: #29483B;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
 
-# =====================================================
-# 3. LOAD MODEL AND DATASET
-# =====================================================
+# =========================================================
+# 3. LOAD MODEL AND DATA
+# =========================================================
 
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
             "solar_cell_model.joblib not found. "
-            "Upload it beside app.py in GitHub."
+            "Upload it to the same GitHub folder as app.py."
         )
     return joblib.load(MODEL_PATH)
 
@@ -157,11 +157,11 @@ def load_dataset():
 try:
     model = load_model()
 except Exception as error:
-    st.error("Could not load your saved model.")
+    st.error("Could not load the saved model.")
     st.code(str(error))
     st.info(
-        "Check that solar_cell_model.joblib exists and that "
-        "your installed package versions are compatible."
+        "Check that solar_cell_model.joblib is in your repository "
+        "and your package versions are compatible."
     )
     st.stop()
 
@@ -170,61 +170,157 @@ try:
 except Exception as error:
     st.error("Could not load the CSV dataset.")
     st.code(str(error))
-    df = None
+    st.stop()
 
-
-# =====================================================
-# 4. IDENTIFY INPUT FEATURES
-# =====================================================
-
-features = getattr(model, "feature_names_in_", None)
-
-if features is not None:
-    FEATURES = list(features)
-elif df is not None and TARGET in df.columns:
-    FEATURES = [column for column in df.columns if column != TARGET]
-else:
+if df is None:
     st.error(
-        "Cannot identify the model input columns. "
-        "Keep the training CSV beside app.py or save the model "
-        "with its original feature names."
+        "Dataset not found. Upload 'Solar Cell data set (1).csv' "
+        "beside app.py in GitHub."
     )
     st.stop()
+
+if TARGET not in df.columns:
+    st.error(f"Target column '{TARGET}' was not found in the CSV.")
+    st.stop()
+
+
+# =========================================================
+# 4. GET THE MODEL'S INPUT FEATURES
+# =========================================================
+
+model_features = getattr(model, "feature_names_in_", None)
+
+if model_features is not None:
+    FEATURES = list(model_features)
+else:
+    FEATURES = [column for column in df.columns if column != TARGET]
 
 if TARGET in FEATURES:
     st.error(
-        "The PCE target appears among the model input features. "
-        "Check your training process to prevent target leakage."
+        "The target PCE column appears among the model input features. "
+        "Check your original training process for target leakage."
     )
     st.stop()
 
-if df is not None:
-    missing = [column for column in FEATURES if column not in df.columns]
-    if missing:
-        st.error("Dataset is missing model columns: " + ", ".join(missing))
-        st.stop()
+missing_columns = [c for c in FEATURES if c not in df.columns]
+
+if missing_columns:
+    st.error(
+        "The CSV is missing model input columns: "
+        + ", ".join(missing_columns)
+    )
+    st.stop()
+
+
+# =========================================================
+# 5. SAFELY DETECT NUMERIC AND CATEGORICAL FEATURES
+# =========================================================
+
+def parse_number(value):
+    """
+    Parse a single number or a pipe-separated numeric list.
+
+    Example:
+        '10.0'        -> 10.0
+        '10.0 | 100.0' -> 55.0
+
+    IMPORTANT: the average of a list is only a technical fallback.
+    It may not represent the physical meaning of that feature.
+    """
+    if pd.isna(value):
+        return np.nan
+
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+
+    text = str(value).strip()
+
+    if not text:
+        return np.nan
+
+    # Accept a single number.
+    try:
+        return float(text)
+    except ValueError:
+        pass
+
+    # Handle pipe-separated numeric values such as "10.0 | 100.0".
+    parts = [part.strip() for part in text.split("|")]
+
+    if len(parts) > 1:
+        numbers = []
+
+        for part in parts:
+            try:
+                numbers.append(float(part))
+            except ValueError:
+                return np.nan
+
+        if numbers:
+            return float(np.mean(numbers))
+
+    return np.nan
+
+
+def numeric_coverage(series):
+    """Return the fraction of non-empty values that parse as numbers."""
+    cleaned = series.dropna().astype(str).str.strip()
+    cleaned = cleaned[cleaned != ""]
+
+    if cleaned.empty:
+        return 0.0
+
+    parsed = cleaned.map(parse_number)
+    return float(parsed.notna().mean())
 
 
 def is_numeric_feature(column):
-    return (
-        df is not None
-        and column in df.columns
-        and pd.api.types.is_numeric_dtype(df[column])
-    )
+    """
+    Treat a column as numeric only if all its observed values
+    can be interpreted numerically, including numeric lists.
+    """
+    if column not in df.columns:
+        return False
+
+    series = df[column]
+    return numeric_coverage(series) == 1.0 and series.notna().any()
+
+
+NUMERIC_FEATURES = [c for c in FEATURES if is_numeric_feature(c)]
+CATEGORICAL_FEATURES = [c for c in FEATURES if c not in NUMERIC_FEATURES]
 
 
 def get_options(column):
-    if df is None or column not in df.columns:
-        return []
-
     values = df[column].dropna().astype(str).str.strip()
     values = values[values != ""]
     return values.value_counts().index[:200].tolist()
 
 
-# =====================================================
-# 5. HEADER AND SUMMARY
-# =====================================================
+def clean_model_inputs(frame):
+    """
+    Clean numeric-looking columns consistently before prediction.
+    Columns such as '10.0 | 100.0' are converted to their mean.
+    Other columns remain categorical strings.
+    """
+    frame = frame.copy()
+
+    for column in FEATURES:
+        if column in NUMERIC_FEATURES:
+            frame[column] = frame[column].map(parse_number)
+        else:
+            frame[column] = frame[column].where(
+                frame[column].notna(), np.nan
+            )
+            frame[column] = frame[column].map(
+                lambda x: str(x).strip() if pd.notna(x) else np.nan
+            )
+
+    return frame[FEATURES]
+
+
+# =========================================================
+# 6. HEADER
+# =========================================================
 
 st.markdown("""
 <div class="hero">
@@ -233,18 +329,17 @@ st.markdown("""
         Discover better<br>solar cell performance.
     </div>
     <div class="hero-copy">
-        Predict power conversion efficiency using solar-cell material
-        and fabrication parameters. Compare predictions and explore
-        promising candidate configurations using your saved model.
+        Predict power conversion efficiency from material and fabrication
+        parameters. Compare model predictions and explore promising
+        configurations using your saved model.
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-if df is not None:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Dataset records", f"{len(df):,}")
-    c2.metric("Model input features", len(FEATURES))
-    c3.metric("Prediction target", "PCE (%)")
+c1, c2, c3 = st.columns(3)
+c1.metric("Dataset records", f"{len(df):,}")
+c2.metric("Model input features", len(FEATURES))
+c3.metric("Prediction target", "PCE (%)")
 
 with st.sidebar:
     st.markdown("## ☀️ SolarIQ")
@@ -260,9 +355,9 @@ with st.sidebar:
     )
 
 
-# =====================================================
-# 6. TABS
-# =====================================================
+# =========================================================
+# 7. TABS
+# =========================================================
 
 tab_predict, tab_optimize, tab_compare, tab_about = st.tabs([
     "🔬 PCE Prediction",
@@ -272,199 +367,169 @@ tab_predict, tab_optimize, tab_compare, tab_about = st.tabs([
 ])
 
 
-# =====================================================
-# 7. PCE PREDICTION WITH DEFAULT VALUES
-# =====================================================
+# =========================================================
+# 8. PCE PREDICTION FORM WITH DEFAULTS
+# =========================================================
 
 with tab_predict:
     st.subheader("Solar cell configuration")
     st.write(
-        "The fields are prefilled using values from your dataset. "
-        "You can keep the defaults or change them."
+        "Inputs are prefilled from your dataset. Change them if needed, "
+        "then click Estimate Cell Efficiency."
     )
 
-    if df is None:
-        st.error(
-            "The CSV is required for default input values. "
-            "Upload Solar Cell data set (1).csv beside app.py."
-        )
-    else:
-        with st.form("prediction_form"):
-            user_values = {}
+    with st.form("prediction_form"):
+        user_values = {}
 
-            categorical = [
-                column for column in FEATURES
-                if not is_numeric_feature(column)
-            ]
-            numeric = [
-                column for column in FEATURES
-                if is_numeric_feature(column)
-            ]
+        st.markdown("### Material and process parameters")
 
-            st.markdown("### Material and process parameters")
+        for start in range(0, len(CATEGORICAL_FEATURES), 2):
+            group = CATEGORICAL_FEATURES[start:start + 2]
+            columns = st.columns(len(group))
 
-            for start in range(0, len(categorical), 2):
-                group = categorical[start:start + 2]
-                columns = st.columns(len(group))
+            for container, feature in zip(columns, group):
+                options = get_options(feature)
 
-                for container, feature in zip(columns, group):
-                    options = get_options(feature)
-
-                    with container:
-                        if options:
-                            user_values[feature] = st.selectbox(
-                                feature,
-                                options=options,
-                                index=0,
-                                key=f"category_{feature}",
-                                help="Options are observed in the dataset.",
-                            )
-                        else:
-                            user_values[feature] = st.text_input(
-                                feature,
-                                key=f"text_{feature}",
-                            )
-
-            if numeric:
-                st.markdown("### Numeric parameters")
-
-            for start in range(0, len(numeric), 2):
-                group = numeric[start:start + 2]
-                columns = st.columns(len(group))
-
-                for container, feature in zip(columns, group):
-                    series = pd.to_numeric(
-                        df[feature], errors="coerce"
-                    ).dropna()
-
-                    with container:
-                        if series.empty:
-                            user_values[feature] = st.number_input(
-                                feature,
-                                value=0.0,
-                                key=f"numeric_{feature}",
-                            )
-                        else:
-                            minimum = float(series.min())
-                            maximum = float(series.max())
-                            median = float(series.median())
-
-                            st.caption(
-                                f"{feature} · observed range: "
-                                f"{minimum:g}–{maximum:g}"
-                            )
-
-                            # Default value is the dataset median.
-                            # Keep it within the allowed range.
-                            default_value = min(
-                                max(median, minimum), maximum
-                            )
-
-                            user_values[feature] = st.number_input(
-                                feature,
-                                min_value=minimum,
-                                max_value=maximum,
-                                value=default_value,
-                                step=0.1,
-                                key=f"numeric_{feature}",
-                            )
-
-            submitted = st.form_submit_button(
-                "☀ Estimate Cell Efficiency",
-                type="primary",
-                use_container_width=True,
-            )
-
-        if submitted:
-            missing = [
-                feature for feature in FEATURES
-                if user_values.get(feature) is None
-                or user_values.get(feature) == ""
-            ]
-
-            if missing:
-                st.error(
-                    "Please complete these fields: "
-                    + ", ".join(missing)
-                )
-            else:
-                input_data = pd.DataFrame(
-                    [[user_values[feature] for feature in FEATURES]],
-                    columns=FEATURES,
-                )
-
-                for feature in numeric:
-                    input_data[feature] = pd.to_numeric(
-                        input_data[feature], errors="coerce"
-                    )
-
-                try:
-                    prediction = float(
-                        np.asarray(model.predict(input_data)).reshape(-1)[0]
-                    )
-
-                    if not np.isfinite(prediction):
-                        raise ValueError("Model returned an invalid prediction.")
-
-                    st.session_state["last_prediction"] = prediction
-                    st.session_state["last_input"] = input_data.copy()
-
-                    st.markdown("---")
-                    st.subheader("Prediction result")
-
-                    st.markdown(
-                        f"""
-                        <div class="panel">
-                            <div class="muted">
-                                PREDICTED POWER CONVERSION EFFICIENCY
-                            </div>
-                            <div class="result-number">{prediction:.2f}%</div>
-                            <div class="muted">
-                                Output from your saved XGBoost model
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    if prediction < 0 or prediction > 100:
-                        st.warning(
-                            "This prediction is outside the physical "
-                            "0–100% range. Check your target units and model."
+                with container:
+                    if options:
+                        # Default to the most frequent observed value.
+                        user_values[feature] = st.selectbox(
+                            feature,
+                            options=options,
+                            index=0,
+                            key=f"cat_{feature}",
+                        )
+                    else:
+                        user_values[feature] = st.text_input(
+                            feature,
+                            value="",
+                            key=f"text_{feature}",
                         )
 
-                    st.info(
-                        "This is a prediction, not a laboratory measurement. "
-                        "It does not guarantee actual cell performance."
+        if NUMERIC_FEATURES:
+            st.markdown("### Numeric parameters")
+
+        for start in range(0, len(NUMERIC_FEATURES), 2):
+            group = NUMERIC_FEATURES[start:start + 2]
+            columns = st.columns(len(group))
+
+            for container, feature in zip(columns, group):
+                series = df[feature].map(parse_number).dropna()
+
+                with container:
+                    if series.empty:
+                        user_values[feature] = st.number_input(
+                            feature,
+                            value=0.0,
+                            key=f"num_{feature}",
+                        )
+                    else:
+                        minimum = float(series.min())
+                        maximum = float(series.max())
+                        median = float(series.median())
+                        default_value = min(max(median, minimum), maximum)
+
+                        st.caption(
+                            f"Observed range: {minimum:g}–{maximum:g}"
+                        )
+
+                        user_values[feature] = st.number_input(
+                            feature,
+                            min_value=minimum,
+                            max_value=maximum,
+                            value=default_value,
+                            step=0.1,
+                            key=f"num_{feature}",
+                        )
+
+        submitted = st.form_submit_button(
+            "☀ Estimate Cell Efficiency",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        missing = [
+            f for f in FEATURES
+            if user_values.get(f) is None
+            or user_values.get(f) == ""
+        ]
+
+        if missing:
+            st.error("Complete these fields: " + ", ".join(missing))
+        else:
+            input_frame = pd.DataFrame(
+                [[user_values[f] for f in FEATURES]],
+                columns=FEATURES,
+            )
+
+            input_frame = clean_model_inputs(input_frame)
+
+            try:
+                prediction = float(
+                    np.asarray(model.predict(input_frame)).reshape(-1)[0]
+                )
+
+                if not np.isfinite(prediction):
+                    raise ValueError("The model returned an invalid value.")
+
+                st.session_state["last_prediction"] = prediction
+                st.session_state["last_input"] = input_frame.copy()
+
+                st.markdown("---")
+                st.subheader("Prediction result")
+
+                st.markdown(
+                    f"""
+                    <div class="panel">
+                        <div class="muted">
+                            PREDICTED POWER CONVERSION EFFICIENCY
+                        </div>
+                        <div class="result-number">{prediction:.2f}%</div>
+                        <div class="muted">
+                            Prediction from your saved XGBoost model
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                if prediction < 0 or prediction > 100:
+                    st.warning(
+                        "This result is outside the physical 0–100% range. "
+                        "Check your target units and model."
                     )
 
-                    with st.expander("View the input values"):
-                        st.dataframe(input_data, use_container_width=True)
+                st.info(
+                    "This is a model estimate, not a laboratory measurement."
+                )
 
-                except Exception as error:
-                    st.error("Prediction failed.")
-                    st.code(str(error))
-                    st.info(
-                        "The model must receive the same feature names, "
-                        "data types, and preprocessing used during training."
-                    )
+                with st.expander("View submitted input values"):
+                    st.dataframe(input_frame, use_container_width=True)
+
+            except Exception as error:
+                st.error("Prediction failed.")
+                st.code(str(error))
+                st.info(
+                    "Your saved model's preprocessing and feature types "
+                    "must match the input format used during training."
+                )
 
 
-# =====================================================
-# 8. OPTIMIZATION
-# =====================================================
+# =========================================================
+# 9. OPTIMIZATION: RANK EXISTING DATASET ROWS
+# =========================================================
 
 with tab_optimize:
     st.subheader("Find promising configurations")
-
     st.write(
-        "Score configurations already in the dataset and rank them "
-        "by the PCE predicted by your saved model."
+        "Score configurations from your dataset and rank them by "
+        "predicted PCE using the saved model."
     )
 
     st.warning(
-        "This ranks existing dataset records. It does not search all "
-        "possible material combinations or guarantee experimental success."
+        "This ranks existing dataset records. It does not guarantee "
+        "a globally optimal or experimentally verified solar cell."
     )
 
     limit = st.slider(
@@ -475,60 +540,53 @@ with tab_optimize:
         key="candidate_limit",
     )
 
-    if df is None:
-        st.error("Upload the CSV to use optimization.")
-    elif st.button(
+    if st.button(
         "🚀 Rank Candidate Configurations",
         type="primary",
         use_container_width=True,
     ):
         try:
             candidates = df[FEATURES].copy()
+            candidates = clean_model_inputs(candidates)
 
-            if TARGET in df.columns:
-                valid_target = pd.to_numeric(
-                    df[TARGET], errors="coerce"
-                ).notna()
-                candidates = candidates.loc[valid_target].copy()
-                source_rows = df.loc[valid_target].copy()
-            else:
-                source_rows = df.copy()
+            # The saved pipeline may impute missing values itself.
+            # If it cannot, report the precise error rather than hide it.
+            predictions = []
 
-            if candidates.empty:
-                st.error("No candidate rows available.")
-            else:
-                predictions = []
+            for start in range(0, len(candidates), 500):
+                batch = candidates.iloc[start:start + 500]
+                batch_predictions = model.predict(batch)
+                predictions.extend(
+                    np.asarray(batch_predictions).reshape(-1).tolist()
+                )
 
-                for start in range(0, len(candidates), 1000):
-                    batch = candidates.iloc[start:start + 1000]
-                    predictions.extend(
-                        np.asarray(model.predict(batch)).reshape(-1).tolist()
-                    )
+            ranked = df.copy()
+            ranked["Predicted PCE (%)"] = predictions
+            ranked = ranked.sort_values(
+                "Predicted PCE (%)", ascending=False
+            ).head(limit)
 
-                source_rows = source_rows.copy()
-                source_rows["Predicted PCE (%)"] = predictions
-
-                ranked = source_rows.sort_values(
-                    "Predicted PCE (%)",
-                    ascending=False,
-                ).head(limit)
-
-                st.session_state["ranked_candidates"] = ranked
+            st.session_state["ranked_candidates"] = ranked
 
         except Exception as error:
             st.error("Optimization failed.")
             st.code(str(error))
+            st.info(
+                "If this error mentions SimpleImputer, the preprocessing "
+                "stored in your model may not match the cleaned inputs. "
+                "The training preprocessing may need to be corrected."
+            )
 
     ranked = st.session_state.get("ranked_candidates")
 
     if ranked is not None:
-        best_prediction = float(ranked["Predicted PCE (%)"].iloc[0])
+        best = float(ranked["Predicted PCE (%)"].iloc[0])
 
         st.markdown(
             f"""
             <div class="panel">
                 <div class="muted">HIGHEST PREDICTED PCE IN CANDIDATES</div>
-                <div class="result-number">{best_prediction:.2f}%</div>
+                <div class="result-number">{best:.2f}%</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -544,127 +602,122 @@ with tab_optimize:
         )
 
 
-# =====================================================
-# 9. MODEL EVALUATION
-# =====================================================
+# =========================================================
+# 10. MODEL EVALUATION
+# =========================================================
 
 with tab_compare:
     st.subheader("Evaluate the saved XGBoost model")
 
     st.write(
-        "Compare model predictions with recorded PCE values in the CSV."
+        "Compare the model's predictions with recorded PCE values "
+        "from the dataset."
     )
 
-    if df is None or TARGET not in df.columns:
-        st.info(
-            f"The dataset must contain the target column {TARGET} "
-            "to calculate these metrics."
-        )
-    else:
-        st.warning(
-            "If this CSV was used to train your model, these are not "
-            "unseen test-set scores. Use a separate test set for a fair "
-            "assessment of generalization."
-        )
+    st.warning(
+        "If the same CSV was used to train the model, these are reference-set "
+        "metrics, not unseen test-set scores."
+    )
 
-        if st.button(
-            "📊 Calculate Metrics",
-            type="primary",
-            use_container_width=True,
-        ):
-            try:
-                actual = pd.to_numeric(df[TARGET], errors="coerce")
-                valid = actual.notna()
+    if st.button(
+        "📊 Calculate Metrics",
+        type="primary",
+        use_container_width=True,
+    ):
+        try:
+            actual = pd.to_numeric(df[TARGET], errors="coerce")
+            valid = actual.notna()
 
-                X_eval = df.loc[valid, FEATURES]
-                y_eval = actual.loc[valid].astype(float)
+            X_eval = clean_model_inputs(df.loc[valid, FEATURES])
+            y_eval = actual.loc[valid].astype(float)
 
-                if len(X_eval) < 2:
-                    raise ValueError("Not enough valid rows for evaluation.")
+            predictions = []
 
-                predictions = []
-
-                for start in range(0, len(X_eval), 1000):
-                    batch = X_eval.iloc[start:start + 1000]
-                    predictions.extend(
-                        np.asarray(model.predict(batch)).reshape(-1).tolist()
-                    )
-
-                predictions = np.asarray(predictions)
-
-                mae = mean_absolute_error(y_eval, predictions)
-                rmse = np.sqrt(mean_squared_error(y_eval, predictions))
-                r2 = r2_score(y_eval, predictions)
-
-                col1, col2, col3 = st.columns(3)
-                col1.metric("MAE", f"{mae:.3f}")
-                col2.metric("RMSE", f"{rmse:.3f}")
-                col3.metric("R² score", f"{r2:.4f}")
-
-                comparison = pd.DataFrame({
-                    "Actual PCE (%)": y_eval.to_numpy(),
-                    "Predicted PCE (%)": predictions,
-                })
-                comparison["Absolute Error"] = (
-                    comparison["Actual PCE (%)"]
-                    - comparison["Predicted PCE (%)"]
-                ).abs()
-
-                st.markdown("### Actual vs predicted")
-                st.scatter_chart(
-                    comparison,
-                    x="Actual PCE (%)",
-                    y="Predicted PCE (%)",
+            for start in range(0, len(X_eval), 500):
+                batch = X_eval.iloc[start:start + 500]
+                predictions.extend(
+                    np.asarray(model.predict(batch)).reshape(-1).tolist()
                 )
 
-                st.dataframe(
-                    comparison.head(100),
-                    use_container_width=True,
-                )
+            predictions = np.asarray(predictions, dtype=float)
 
-                st.download_button(
-                    "Download evaluation CSV",
-                    data=comparison.to_csv(index=False).encode("utf-8"),
-                    file_name="xgboost_evaluation.csv",
-                    mime="text/csv",
-                )
+            mae = mean_absolute_error(y_eval, predictions)
+            rmse = np.sqrt(mean_squared_error(y_eval, predictions))
+            r2 = r2_score(y_eval, predictions)
 
-            except Exception as error:
-                st.error("Could not calculate evaluation metrics.")
-                st.code(str(error))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("MAE", f"{mae:.3f}")
+            c2.metric("RMSE", f"{rmse:.3f}")
+            c3.metric("R² score", f"{r2:.4f}")
+
+            comparison = pd.DataFrame({
+                "Actual PCE (%)": y_eval.to_numpy(),
+                "Predicted PCE (%)": predictions,
+            })
+
+            comparison["Absolute Error"] = (
+                comparison["Actual PCE (%)"]
+                - comparison["Predicted PCE (%)"]
+            ).abs()
+
+            st.markdown("### Actual vs predicted PCE")
+            st.scatter_chart(
+                comparison,
+                x="Actual PCE (%)",
+                y="Predicted PCE (%)",
+            )
+
+            st.dataframe(
+                comparison.head(100),
+                use_container_width=True,
+            )
+
+            st.download_button(
+                "Download evaluation CSV",
+                data=comparison.to_csv(index=False).encode("utf-8"),
+                file_name="xgboost_evaluation.csv",
+                mime="text/csv",
+            )
+
+        except Exception as error:
+            st.error("Could not calculate evaluation metrics.")
+            st.code(str(error))
+            st.info(
+                "The saved model may contain a preprocessing pipeline that "
+                "expects different input types or column names."
+            )
 
 
-# =====================================================
-# 10. ABOUT THE PROJECT
-# =====================================================
+# =========================================================
+# 11. ABOUT
+# =========================================================
 
 with tab_about:
-    st.subheader("Project overview")
+    st.subheader("About the project")
 
     st.markdown("""
     **Objective:** Predict solar-cell power conversion efficiency (PCE)
-    from material and fabrication features.
+    from material and fabrication parameters.
 
-    **Algorithm:** XGBoost Regression, a gradient-boosted decision-tree
-    algorithm that builds trees sequentially to improve predictions.
+    **Algorithm:** XGBoost Regression. XGBoost builds decision trees
+    sequentially, with later trees helping correct earlier prediction errors.
 
-    **Implementation workflow:**
+    **Workflow:**
     1. Prepare the solar-cell dataset.
     2. Train XGBoost in Google Colab.
-    3. Save the trained model as a Joblib file.
-    4. Load the saved model in this Streamlit website.
-    5. Predict PCE for a configuration.
-    6. Rank existing configurations by predicted PCE.
+    3. Save the model as a Joblib file.
+    4. Load the saved model in Streamlit.
+    5. Predict PCE for a selected configuration.
+    6. Rank existing dataset configurations by predicted PCE.
 
     **Limitations:**
-    - Predicted results are estimates, not experimental measurements.
-    - Dataset-level evaluation may be optimistic if the same data was
-      used for training.
-    - Ranking existing configurations is not proof of a global optimum.
-    - Input columns and preprocessing must match the training process.
+    - Predictions are estimates, not experimental measurements.
+    - Reference-set metrics may be optimistic if training used the same data.
+    - Ranking existing rows does not guarantee a global optimum.
+    - Model preprocessing must match the original training procedure.
     """)
 
-    st.markdown("### Required files")
+    st.markdown("### Required repository files")
     st.code(
         "app.py\n"
         "solar_cell_model.joblib\n"
@@ -673,9 +726,9 @@ with tab_about:
     )
 
 
-# =====================================================
-# 11. FOOTER
-# =====================================================
+# =========================================================
+# 12. FOOTER
+# =========================================================
 
 st.divider()
 
