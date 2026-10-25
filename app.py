@@ -1,4 +1,3 @@
-```python
 import os
 import warnings
 import joblib
@@ -840,4 +839,4 @@ st.markdown("""
     <small>Machine Learning Laboratory Project · XGBoost Regression</small>
 </div>
 """, unsafe_allow_html=True)
-```
+
