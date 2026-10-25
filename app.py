@@ -1,6 +1,5 @@
 
 import os
-import re
 import warnings
 import joblib
 import numpy as np
@@ -12,11 +11,11 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 warnings.filterwarnings("ignore")
 
 # =========================================================
-# 1. PAGE CONFIGURATION
+# 1. CONFIGURATION
 # =========================================================
 
 st.set_page_config(
-    page_title="SolarIQ | AI Solar Cell Optimizer",
+    page_title="SolarAI | Solar Cell Optimization",
     page_icon="☀️",
     layout="wide",
 )
@@ -28,7 +27,7 @@ TARGET = "JV_default_PCE"
 
 
 # =========================================================
-# 2. PREMIUM WEBSITE DESIGN
+# 2. DESIGN
 # =========================================================
 
 st.markdown("""
@@ -42,17 +41,18 @@ st.markdown("""
 }
 
 h1, h2, h3 {
-    font-family: 'Space Grotesk', sans-serif !important;
     color: #F3F4EC;
+    font-family: 'Space Grotesk', sans-serif !important;
 }
 
 .hero {
     padding: 34px;
     border: 1px solid #29483B;
     border-radius: 22px;
-    background: radial-gradient(circle at 85% 10%, #294B35, transparent 42%),
-                linear-gradient(135deg, #10251C, #0B1914);
-    margin-bottom: 25px;
+    background:
+        radial-gradient(circle at 85% 10%, #294B35, transparent 42%),
+        linear-gradient(135deg, #10251C, #0B1914);
+    margin-bottom: 24px;
 }
 
 .eyebrow {
@@ -66,7 +66,7 @@ h1, h2, h3 {
     font-family: 'Space Grotesk', sans-serif;
     font-size: clamp(32px, 5vw, 52px);
     font-weight: 700;
-    line-height: 1.1;
+    line-height: 1.12;
     margin: 16px 0;
 }
 
@@ -80,7 +80,7 @@ div[data-testid="stMetric"] {
     background: #10231B;
     border: 1px solid #29483B;
     border-radius: 14px;
-    padding: 18px;
+    padding: 16px;
 }
 
 div[data-testid="stMetricValue"] {
@@ -91,22 +91,22 @@ div[data-testid="stMetricLabel"] {
     color: #B5C7BC;
 }
 
-.panel {
+.result-panel {
     background: #10231B;
-    border: 1px solid #29483B;
-    border-radius: 16px;
-    padding: 24px;
-    margin: 10px 0;
+    border: 1px solid #456B4D;
+    border-radius: 18px;
+    padding: 26px;
+    margin: 12px 0;
 }
 
 .result-number {
     color: #E6BD65;
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 50px;
+    font-size: 48px;
     font-weight: 700;
 }
 
-.muted {
+.small-muted {
     color: #A9BDB0;
     font-size: 13px;
 }
@@ -134,15 +134,15 @@ hr {
 
 
 # =========================================================
-# 3. LOAD MODEL AND DATA
+# 3. LOAD SAVED MODEL AND CSV
 # =========================================================
 
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
-            "solar_cell_model.joblib not found. "
-            "Upload it to the same GitHub folder as app.py."
+            "solar_cell_model.joblib was not found. "
+            "Upload it beside app.py in your GitHub repository."
         )
     return joblib.load(MODEL_PATH)
 
@@ -156,166 +156,133 @@ def load_dataset():
 
 try:
     model = load_model()
-except Exception as error:
-    st.error("Could not load the saved model.")
-    st.code(str(error))
+except Exception as exc:
+    st.error("The saved model could not be loaded.")
+    st.code(str(exc))
     st.info(
-        "Check that solar_cell_model.joblib is in your repository "
-        "and your package versions are compatible."
+        "Check the model file and use compatible scikit-learn, "
+        "XGBoost and joblib versions."
     )
     st.stop()
 
 try:
     df = load_dataset()
-except Exception as error:
-    st.error("Could not load the CSV dataset.")
-    st.code(str(error))
+except Exception as exc:
+    st.error("The dataset could not be loaded.")
+    st.code(str(exc))
     st.stop()
 
 if df is None:
     st.error(
         "Dataset not found. Upload 'Solar Cell data set (1).csv' "
-        "beside app.py in GitHub."
+        "to the same repository folder as app.py."
     )
     st.stop()
 
 if TARGET not in df.columns:
-    st.error(f"Target column '{TARGET}' was not found in the CSV.")
+    st.error(f"Expected target column '{TARGET}' is missing.")
     st.stop()
 
 
 # =========================================================
-# 4. GET THE MODEL'S INPUT FEATURES
+# 4. IDENTIFY FEATURES
 # =========================================================
 
-model_features = getattr(model, "feature_names_in_", None)
+model_feature_names = getattr(model, "feature_names_in_", None)
 
-if model_features is not None:
-    FEATURES = list(model_features)
+if model_feature_names is not None:
+    FEATURES = list(model_feature_names)
 else:
-    FEATURES = [column for column in df.columns if column != TARGET]
+    FEATURES = [c for c in df.columns if c != TARGET]
 
 if TARGET in FEATURES:
     st.error(
-        "The target PCE column appears among the model input features. "
-        "Check your original training process for target leakage."
+        "The target column is included in the model inputs. "
+        "Check your original training code for target leakage."
     )
     st.stop()
 
-missing_columns = [c for c in FEATURES if c not in df.columns]
+missing_features = [c for c in FEATURES if c not in df.columns]
 
-if missing_columns:
+if missing_features:
     st.error(
-        "The CSV is missing model input columns: "
-        + ", ".join(missing_columns)
+        "These model features are missing from the CSV: "
+        + ", ".join(missing_features)
     )
     st.stop()
 
 
 # =========================================================
-# 5. SAFELY DETECT NUMERIC AND CATEGORICAL FEATURES
+# 5. FEATURE TYPES AND DEFAULTS
 # =========================================================
-
-def parse_number(value):
-    """
-    Parse a single number or a pipe-separated numeric list.
-
-    Example:
-        '10.0'        -> 10.0
-        '10.0 | 100.0' -> 55.0
-
-    IMPORTANT: the average of a list is only a technical fallback.
-    It may not represent the physical meaning of that feature.
-    """
-    if pd.isna(value):
-        return np.nan
-
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        return float(value)
-
-    text = str(value).strip()
-
-    if not text:
-        return np.nan
-
-    # Accept a single number.
-    try:
-        return float(text)
-    except ValueError:
-        pass
-
-    # Handle pipe-separated numeric values such as "10.0 | 100.0".
-    parts = [part.strip() for part in text.split("|")]
-
-    if len(parts) > 1:
-        numbers = []
-
-        for part in parts:
-            try:
-                numbers.append(float(part))
-            except ValueError:
-                return np.nan
-
-        if numbers:
-            return float(np.mean(numbers))
-
-    return np.nan
-
-
-def numeric_coverage(series):
-    """Return the fraction of non-empty values that parse as numbers."""
-    cleaned = series.dropna().astype(str).str.strip()
-    cleaned = cleaned[cleaned != ""]
-
-    if cleaned.empty:
-        return 0.0
-
-    parsed = cleaned.map(parse_number)
-    return float(parsed.notna().mean())
-
 
 def is_numeric_feature(column):
     """
-    Treat a column as numeric only if all its observed values
-    can be interpreted numerically, including numeric lists.
+    Only columns whose actual CSV dtype is numeric are numeric.
+    Text such as '10.0 | 100.0' stays categorical.
+    Boolean columns stay Boolean.
     """
-    if column not in df.columns:
-        return False
-
-    series = df[column]
-    return numeric_coverage(series) == 1.0 and series.notna().any()
+    return (
+        pd.api.types.is_numeric_dtype(df[column])
+        and not pd.api.types.is_bool_dtype(df[column])
+    )
 
 
 NUMERIC_FEATURES = [c for c in FEATURES if is_numeric_feature(c)]
 CATEGORICAL_FEATURES = [c for c in FEATURES if c not in NUMERIC_FEATURES]
 
 
-def get_options(column):
-    values = df[column].dropna().astype(str).str.strip()
-    values = values[values != ""]
-    return values.value_counts().index[:200].tolist()
+def category_values(column):
+    """Return actual non-missing values in their original types."""
+    values = df[column].dropna().unique().tolist()
+    return values
 
 
-def clean_model_inputs(frame):
+def category_label(value):
+    if isinstance(value, (bool, np.bool_)):
+        return str(bool(value))
+    return str(value)
+
+
+def category_default(column):
+    """Most frequent non-missing value from the dataset."""
+    values = df[column].dropna()
+
+    if values.empty:
+        return None
+
+    modes = values.mode(dropna=True)
+    if not modes.empty:
+        return modes.iloc[0]
+
+    return values.iloc[0]
+
+
+def numeric_default(column):
+    values = pd.to_numeric(df[column], errors="coerce").dropna()
+
+    if values.empty:
+        return 0.0, 0.0, 0.0
+
+    return (
+        float(values.min()),
+        float(values.max()),
+        float(values.median()),
+    )
+
+
+def validate_input_frame(frame):
     """
-    Clean numeric-looking columns consistently before prediction.
-    Columns such as '10.0 | 100.0' are converted to their mean.
-    Other columns remain categorical strings.
+    Preserve original categorical values and numeric column types.
+    Do not turn pipe-separated text or Boolean values into arbitrary
+    numbers. The saved model must accept this original representation.
     """
-    frame = frame.copy()
+    frame = frame[FEATURES].copy()
 
-    for column in FEATURES:
-        if column in NUMERIC_FEATURES:
-            frame[column] = frame[column].map(parse_number)
-        else:
-            frame[column] = frame[column].where(
-                frame[column].notna(), np.nan
-            )
-            frame[column] = frame[column].map(
-                lambda x: str(x).strip() if pd.notna(x) else np.nan
-            )
+    for column in NUMERIC_FEATURES:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
-    return frame[FEATURES]
+    return frame
 
 
 # =========================================================
@@ -324,42 +291,38 @@ def clean_model_inputs(frame):
 
 st.markdown("""
 <div class="hero">
-    <div class="eyebrow">AI MATERIALS RESEARCH · XGBOOST</div>
-    <div class="hero-title">
-        Discover better<br>solar cell performance.
-    </div>
+    <div class="eyebrow">MACHINE LEARNING · SOLAR MATERIALS</div>
+    <div class="hero-title">SolarAI<br>Smarter Solar Cell Research.</div>
     <div class="hero-copy">
-        Predict power conversion efficiency from material and fabrication
-        parameters. Compare model predictions and explore promising
-        configurations using your saved model.
+        Predict solar-cell power conversion efficiency, explore promising
+        configurations, and evaluate model performance using your saved
+        XGBoost model.
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Dataset records", f"{len(df):,}")
-c2.metric("Model input features", len(FEATURES))
-c3.metric("Prediction target", "PCE (%)")
+m1, m2, m3 = st.columns(3)
+m1.metric("Dataset records", f"{len(df):,}")
+m2.metric("Model input features", len(FEATURES))
+m3.metric("Prediction target", "PCE (%)")
 
 with st.sidebar:
-    st.markdown("## ☀️ SolarIQ")
-    st.caption("AI solar materials research")
+    st.markdown("## ☀️ SolarAI")
+    st.caption("AI-Based Solar Cell Material Optimization")
     st.divider()
-    st.markdown("### Project details")
+    st.markdown("### Model information")
     st.write("Algorithm: XGBoost Regression")
-    st.write("Target: Power Conversion Efficiency")
-    st.write("Model: Saved Joblib file")
+    st.write("Output: Power Conversion Efficiency")
+    st.write("Model source: Saved Joblib file")
     st.divider()
-    st.caption(
-        "Predictions are estimates and must be experimentally validated."
-    )
+    st.caption("Predictions are estimates, not experimental guarantees.")
 
 
 # =========================================================
-# 7. TABS
+# 7. APPLICATION TABS
 # =========================================================
 
-tab_predict, tab_optimize, tab_compare, tab_about = st.tabs([
+tab_predict, tab_optimize, tab_evaluate, tab_about = st.tabs([
     "🔬 PCE Prediction",
     "🚀 Optimization",
     "📊 Model Evaluation",
@@ -368,37 +331,54 @@ tab_predict, tab_optimize, tab_compare, tab_about = st.tabs([
 
 
 # =========================================================
-# 8. PCE PREDICTION FORM WITH DEFAULTS
+# 8. PCE PREDICTION
 # =========================================================
 
 with tab_predict:
     st.subheader("Solar cell configuration")
+
     st.write(
-        "Inputs are prefilled from your dataset. Change them if needed, "
-        "then click Estimate Cell Efficiency."
+        "The form starts with default values from your dataset. "
+        "You can change the inputs before predicting."
     )
 
-    with st.form("prediction_form"):
+    with st.form("solar_prediction_form"):
         user_values = {}
 
-        st.markdown("### Material and process parameters")
+        st.markdown("### Material and process features")
 
         for start in range(0, len(CATEGORICAL_FEATURES), 2):
             group = CATEGORICAL_FEATURES[start:start + 2]
             columns = st.columns(len(group))
 
             for container, feature in zip(columns, group):
-                options = get_options(feature)
+                options = category_values(feature)
 
                 with container:
                     if options:
-                        # Default to the most frequent observed value.
-                        user_values[feature] = st.selectbox(
+                        default = category_default(feature)
+
+                        # Find the matching default option.
+                        default_index = next(
+                            (
+                                i for i, value in enumerate(options)
+                                if (
+                                    type(value) is type(default)
+                                    and value == default
+                                )
+                            ),
+                            0,
+                        )
+
+                        selected = st.selectbox(
                             feature,
                             options=options,
-                            index=0,
+                            index=default_index,
+                            format_func=category_label,
                             key=f"cat_{feature}",
                         )
+
+                        user_values[feature] = selected
                     else:
                         user_values[feature] = st.text_input(
                             feature,
@@ -407,37 +387,32 @@ with tab_predict:
                         )
 
         if NUMERIC_FEATURES:
-            st.markdown("### Numeric parameters")
+            st.markdown("### Numeric features")
 
         for start in range(0, len(NUMERIC_FEATURES), 2):
             group = NUMERIC_FEATURES[start:start + 2]
             columns = st.columns(len(group))
 
             for container, feature in zip(columns, group):
-                series = df[feature].map(parse_number).dropna()
+                minimum, maximum, median = numeric_default(feature)
 
                 with container:
-                    if series.empty:
+                    st.caption(
+                        f"Observed range: {minimum:g} to {maximum:g}"
+                    )
+
+                    if minimum == maximum:
                         user_values[feature] = st.number_input(
                             feature,
-                            value=0.0,
+                            value=median,
                             key=f"num_{feature}",
                         )
                     else:
-                        minimum = float(series.min())
-                        maximum = float(series.max())
-                        median = float(series.median())
-                        default_value = min(max(median, minimum), maximum)
-
-                        st.caption(
-                            f"Observed range: {minimum:g}–{maximum:g}"
-                        )
-
                         user_values[feature] = st.number_input(
                             feature,
                             min_value=minimum,
                             max_value=maximum,
-                            value=default_value,
+                            value=median,
                             step=0.1,
                             key=f"num_{feature}",
                         )
@@ -452,20 +427,23 @@ with tab_predict:
         missing = [
             f for f in FEATURES
             if user_values.get(f) is None
-            or user_values.get(f) == ""
+            or (
+                isinstance(user_values.get(f), str)
+                and user_values.get(f).strip() == ""
+            )
         ]
 
         if missing:
-            st.error("Complete these fields: " + ", ".join(missing))
+            st.error("Please complete: " + ", ".join(missing))
         else:
-            input_frame = pd.DataFrame(
-                [[user_values[f] for f in FEATURES]],
-                columns=FEATURES,
-            )
-
-            input_frame = clean_model_inputs(input_frame)
-
             try:
+                input_frame = pd.DataFrame(
+                    [[user_values[f] for f in FEATURES]],
+                    columns=FEATURES,
+                )
+
+                input_frame = validate_input_frame(input_frame)
+
                 prediction = float(
                     np.asarray(model.predict(input_frame)).reshape(-1)[0]
                 )
@@ -481,13 +459,13 @@ with tab_predict:
 
                 st.markdown(
                     f"""
-                    <div class="panel">
-                        <div class="muted">
+                    <div class="result-panel">
+                        <div class="small-muted">
                             PREDICTED POWER CONVERSION EFFICIENCY
                         </div>
                         <div class="result-number">{prediction:.2f}%</div>
-                        <div class="muted">
-                            Prediction from your saved XGBoost model
+                        <div class="small-muted">
+                            Output from your saved XGBoost model
                         </div>
                     </div>
                     """,
@@ -496,48 +474,53 @@ with tab_predict:
 
                 if prediction < 0 or prediction > 100:
                     st.warning(
-                        "This result is outside the physical 0–100% range. "
-                        "Check your target units and model."
+                        "The prediction is outside 0–100%. Check the target "
+                        "units and the training process."
                     )
 
                 st.info(
-                    "This is a model estimate, not a laboratory measurement."
+                    "This result is a model estimate. Actual efficiency "
+                    "requires experimental validation."
                 )
 
-                with st.expander("View submitted input values"):
+                with st.expander("View input values"):
                     st.dataframe(input_frame, use_container_width=True)
 
-            except Exception as error:
+            except Exception as exc:
                 st.error("Prediction failed.")
-                st.code(str(error))
-                st.info(
-                    "Your saved model's preprocessing and feature types "
-                    "must match the input format used during training."
+                st.code(str(exc))
+                st.warning(
+                    "If the error mentions converting a string or Boolean "
+                    "to float, your saved model may expect encoded features "
+                    "rather than the raw CSV columns. Use the same feature "
+                    "preprocessing from your original Colab training code."
                 )
 
 
 # =========================================================
-# 9. OPTIMIZATION: RANK EXISTING DATASET ROWS
+# 9. OPTIMIZATION
 # =========================================================
 
 with tab_optimize:
-    st.subheader("Find promising configurations")
+    st.subheader("Rank promising solar-cell configurations")
+
     st.write(
-        "Score configurations from your dataset and rank them by "
-        "predicted PCE using the saved model."
+        "The saved model scores existing rows from the dataset and ranks "
+        "them by predicted PCE. No new model is trained."
     )
 
     st.warning(
-        "This ranks existing dataset records. It does not guarantee "
-        "a globally optimal or experimentally verified solar cell."
+        "This is a ranking of existing records, not a search of every "
+        "possible material combination. A high prediction is not proof "
+        "of a real-world improvement."
     )
 
-    limit = st.slider(
-        "Number of candidates",
+    number_of_candidates = st.slider(
+        "Number of candidates to show",
         min_value=5,
         max_value=25,
         value=10,
-        key="candidate_limit",
+        key="number_of_candidates",
     )
 
     if st.button(
@@ -546,15 +529,12 @@ with tab_optimize:
         use_container_width=True,
     ):
         try:
-            candidates = df[FEATURES].copy()
-            candidates = clean_model_inputs(candidates)
+            candidate_inputs = validate_input_frame(df[FEATURES].copy())
 
-            # The saved pipeline may impute missing values itself.
-            # If it cannot, report the precise error rather than hide it.
             predictions = []
 
-            for start in range(0, len(candidates), 500):
-                batch = candidates.iloc[start:start + 500]
+            for start in range(0, len(candidate_inputs), 500):
+                batch = candidate_inputs.iloc[start:start + 500]
                 batch_predictions = model.predict(batch)
                 predictions.extend(
                     np.asarray(batch_predictions).reshape(-1).tolist()
@@ -562,31 +542,36 @@ with tab_optimize:
 
             ranked = df.copy()
             ranked["Predicted PCE (%)"] = predictions
+
             ranked = ranked.sort_values(
-                "Predicted PCE (%)", ascending=False
-            ).head(limit)
+                "Predicted PCE (%)",
+                ascending=False,
+            ).head(number_of_candidates)
 
             st.session_state["ranked_candidates"] = ranked
 
-        except Exception as error:
+        except Exception as exc:
             st.error("Optimization failed.")
-            st.code(str(error))
-            st.info(
-                "If this error mentions SimpleImputer, the preprocessing "
-                "stored in your model may not match the cleaned inputs. "
-                "The training preprocessing may need to be corrected."
+            st.code(str(exc))
+            st.warning(
+                "Optimization uses raw dataset features. If the model "
+                "expects transformed inputs, use the preprocessing pipeline "
+                "saved with the model during training."
             )
 
     ranked = st.session_state.get("ranked_candidates")
 
     if ranked is not None:
-        best = float(ranked["Predicted PCE (%)"].iloc[0])
+        best_pce = float(ranked["Predicted PCE (%)"].iloc[0])
 
         st.markdown(
             f"""
-            <div class="panel">
-                <div class="muted">HIGHEST PREDICTED PCE IN CANDIDATES</div>
-                <div class="result-number">{best:.2f}%</div>
+            <div class="result-panel">
+                <div class="small-muted">TOP PREDICTED PCE</div>
+                <div class="result-number">{best_pce:.2f}%</div>
+                <div class="small-muted">
+                    Highest model prediction among the ranked records
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -595,9 +580,9 @@ with tab_optimize:
         st.dataframe(ranked, use_container_width=True)
 
         st.download_button(
-            "Download ranked candidates CSV",
+            "⬇ Download ranked candidates",
             data=ranked.to_csv(index=False).encode("utf-8"),
-            file_name="solar_cell_optimization_candidates.csv",
+            file_name="solarai_ranked_candidates.csv",
             mime="text/csv",
         )
 
@@ -606,21 +591,21 @@ with tab_optimize:
 # 10. MODEL EVALUATION
 # =========================================================
 
-with tab_compare:
-    st.subheader("Evaluate the saved XGBoost model")
+with tab_evaluate:
+    st.subheader("Evaluate XGBoost prediction performance")
 
     st.write(
-        "Compare the model's predictions with recorded PCE values "
-        "from the dataset."
+        "Calculate error metrics by comparing model predictions with "
+        "the recorded PCE values in the dataset."
     )
 
     st.warning(
-        "If the same CSV was used to train the model, these are reference-set "
-        "metrics, not unseen test-set scores."
+        "If the model was trained using this same CSV, these scores are "
+        "reference-set metrics, not independent test-set performance."
     )
 
     if st.button(
-        "📊 Calculate Metrics",
+        "📊 Calculate Evaluation Metrics",
         type="primary",
         use_container_width=True,
     ):
@@ -628,15 +613,19 @@ with tab_compare:
             actual = pd.to_numeric(df[TARGET], errors="coerce")
             valid = actual.notna()
 
-            X_eval = clean_model_inputs(df.loc[valid, FEATURES])
+            X_eval = validate_input_frame(df.loc[valid, FEATURES].copy())
             y_eval = actual.loc[valid].astype(float)
+
+            if len(X_eval) < 2:
+                raise ValueError("Not enough valid target rows.")
 
             predictions = []
 
             for start in range(0, len(X_eval), 500):
                 batch = X_eval.iloc[start:start + 500]
+                batch_predictions = model.predict(batch)
                 predictions.extend(
-                    np.asarray(model.predict(batch)).reshape(-1).tolist()
+                    np.asarray(batch_predictions).reshape(-1).tolist()
                 )
 
             predictions = np.asarray(predictions, dtype=float)
@@ -646,8 +635,8 @@ with tab_compare:
             r2 = r2_score(y_eval, predictions)
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("MAE", f"{mae:.3f}")
-            c2.metric("RMSE", f"{rmse:.3f}")
+            c1.metric("MAE", f"{mae:.4f}")
+            c2.metric("RMSE", f"{rmse:.4f}")
             c3.metric("R² score", f"{r2:.4f}")
 
             comparison = pd.DataFrame({
@@ -661,63 +650,72 @@ with tab_compare:
             ).abs()
 
             st.markdown("### Actual vs predicted PCE")
+
             st.scatter_chart(
                 comparison,
                 x="Actual PCE (%)",
                 y="Predicted PCE (%)",
             )
 
+            st.markdown("### Prediction examples")
             st.dataframe(
                 comparison.head(100),
                 use_container_width=True,
             )
 
             st.download_button(
-                "Download evaluation CSV",
+                "⬇ Download evaluation results",
                 data=comparison.to_csv(index=False).encode("utf-8"),
-                file_name="xgboost_evaluation.csv",
+                file_name="solarai_evaluation_results.csv",
                 mime="text/csv",
             )
 
-        except Exception as error:
-            st.error("Could not calculate evaluation metrics.")
-            st.code(str(error))
-            st.info(
-                "The saved model may contain a preprocessing pipeline that "
-                "expects different input types or column names."
+            st.markdown("### How to interpret these metrics")
+            st.write("**MAE:** average absolute prediction error; lower is better.")
+            st.write("**RMSE:** penalizes larger errors; lower is better.")
+            st.write("**R²:** closer to 1 is generally better.")
+
+        except Exception as exc:
+            st.error("Model evaluation failed.")
+            st.code(str(exc))
+            st.warning(
+                "Check that the saved model uses the same feature names, "
+                "data types, and preprocessing as the CSV."
             )
 
 
 # =========================================================
-# 11. ABOUT
+# 11. ABOUT THE PROJECT
 # =========================================================
 
 with tab_about:
-    st.subheader("About the project")
+    st.subheader("About SolarAI")
 
     st.markdown("""
-    **Objective:** Predict solar-cell power conversion efficiency (PCE)
+    **Project:** AI-Based Solar Cell Material Optimization Using XGBoost
+
+    **Objective:** Predict solar-cell Power Conversion Efficiency (PCE)
     from material and fabrication parameters.
 
-    **Algorithm:** XGBoost Regression. XGBoost builds decision trees
-    sequentially, with later trees helping correct earlier prediction errors.
+    **Algorithm:** XGBoost Regression is a gradient-boosting algorithm
+    that combines decision trees to predict continuous values.
 
     **Workflow:**
     1. Prepare the solar-cell dataset.
     2. Train XGBoost in Google Colab.
-    3. Save the model as a Joblib file.
-    4. Load the saved model in Streamlit.
-    5. Predict PCE for a selected configuration.
-    6. Rank existing dataset configurations by predicted PCE.
+    3. Save the trained model in a Joblib file.
+    4. Load the saved model in this Streamlit website.
+    5. Predict PCE for selected inputs.
+    6. Rank existing configurations by predicted PCE.
 
     **Limitations:**
-    - Predictions are estimates, not experimental measurements.
-    - Reference-set metrics may be optimistic if training used the same data.
-    - Ranking existing rows does not guarantee a global optimum.
-    - Model preprocessing must match the original training procedure.
+    - Predictions are estimates, not laboratory measurements.
+    - Evaluation on training data may overstate model performance.
+    - Ranking existing records does not guarantee a global optimum.
+    - The deployed model must use the same preprocessing as training.
     """)
 
-    st.markdown("### Required repository files")
+    st.markdown("### Required files")
     st.code(
         "app.py\n"
         "solar_cell_model.joblib\n"
@@ -733,9 +731,9 @@ with tab_about:
 st.divider()
 
 st.markdown("""
-<div style="text-align:center; padding:15px; color:#8FA69A;">
-    <b style="color:#E6BD65;">SolarIQ</b><br>
-    AI-Based Solar Cell Material Optimization using XGBoost<br>
+<div style="text-align:center; padding:16px; color:#8FA69A;">
+    <b style="color:#E6BD65;">SolarAI</b><br>
+    AI-Based Solar Cell Material Optimization Using XGBoost<br>
     <small>Machine Learning Laboratory Project</small>
 </div>
 """, unsafe_allow_html=True)
